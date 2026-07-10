@@ -1,6 +1,10 @@
 .*
 !.gitignore
 !.nojekyll
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
 work/
 __pycache__/
 *.pyc
