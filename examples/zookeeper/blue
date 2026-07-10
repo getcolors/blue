@@ -1,0 +1,126 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["blue"]
+#
+# [tool.uv.sources]
+# blue = { path = "../.." }
+# ///
+# -*- mode: python; -*-
+# Self-contained blue CLI for a fake ZooKeeper cluster.
+# Run from this directory:   ./blue create   |   ./blue delete
+#
+# In-repo example: blue is depended on by relative path via [tool.uv.sources]
+# and the templates travel as files next to the script. An external consumer
+# would pin a released version (dependencies = ["blue==x.y.z"]) or a pinned
+# git reference — never unpinned.
+
+import sys
+from pathlib import Path
+
+from blue import dry_run, tofu
+from blue.cli import exec_cli, run_cli
+from blue.scaffold import scaffold
+from blue.workflow import advice_add, workflow
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+main_tf = (SCRIPT_DIR / "resources/zk/main.tf").read_text()
+zoo_cfg = (SCRIPT_DIR / "resources/zk/zoo.cfg").read_text()
+
+
+def example_path(p):
+    if p is None:
+        return None
+    return p if p.startswith("/") else f"{SCRIPT_DIR}/{p}"
+
+
+def workdir(opts):
+    return example_path(opts.get("zk/workdir"))
+
+
+def node_dir(opts, node):
+    return f"{workdir(opts)}/nodes/{node['id']}"
+
+
+def start_step(opts):
+    return opts
+
+
+async def node_step(opts):
+    node = opts["zk/node"]
+    dir = node_dir(opts, node)
+    specs = [
+        {
+            "template": {"name": "zk/main.tf", "content": main_tf},
+            "target": f"{dir}/main.tf",
+            "data": {"node": node},
+        }
+    ]
+    if opts.get("blue/event") == "delete":
+        out = await tofu.tofu_step(opts, dir=dir)
+        return out if (out.get("blue/exit") or 0) > 0 else scaffold(out, specs)
+    return await tofu.tofu_step(scaffold(opts, specs), dir=dir)
+
+
+def zoo_cfg_step(opts):
+    nodes = opts["zk/servers"]
+    if opts.get("blue/event") == "delete":
+        servers = nodes
+    else:
+        servers = sorted(
+            (b["tofu/outputs"] for b in opts["blue/branches"]), key=lambda o: o["id"]
+        )
+    specs = [
+        {
+            "template": {"name": "zk/zoo.cfg", "content": zoo_cfg},
+            "target": f"{workdir(opts)}/nodes/{n['id']}/zoo.cfg",
+            "data": {"servers": servers},
+        }
+        for n in nodes
+    ]
+    return scaffold(opts, specs)
+
+
+def wire_fn(step, _run_opts):
+    return {
+        "zk/start": (start_step, "zk/node"),
+        "zk/node": (node_step, "zk/zoo-cfg"),
+        "zk/zoo-cfg": (zoo_cfg_step,),
+    }.get(step)
+
+
+def next_fn(step, default_next, opts):
+    if (opts.get("blue/exit") or 0) > 0:
+        return []
+    if step == "zk/start":
+        return [("zk/node", {**opts, "zk/node": n}) for n in opts["zk/servers"]]
+    return [(s, opts) for s in (default_next or [])]
+
+
+wf = workflow(start="zk/start", wire_fn=wire_fn, next_fn=next_fn)
+# the backend is not hardwired: the local filesystem backend is injected
+# with the advice facility
+wf = advice_add(
+    wf, "zk/node", "before", "example/backend",
+    tofu.local_backend_advice(lambda o: node_dir(o, o["zk/node"])),
+)
+# ./blue create --dry-run prints what would run instead of running it
+wf = dry_run.advise(wf, ["zk/node", "zk/zoo-cfg"])
+
+
+def file_arg(a):
+    return a in ("-f", "--file") or a.startswith("--file=")
+
+
+def default_args(args):
+    return args if any(file_arg(a) for a in args) else [*args, "-f", f"{SCRIPT_DIR}/blue.yml"]
+
+
+def run(*args):
+    """REPL/test-friendly entrypoint: resolves without calling sys.exit."""
+    return run_cli(wf, default_args(list(args)))
+
+
+if __name__ == "__main__":
+    exec_cli(wf, default_args(sys.argv[1:]))

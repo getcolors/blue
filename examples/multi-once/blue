@@ -1,0 +1,385 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["blue"]
+#
+# [tool.uv.sources]
+# blue = { path = "../.." }
+# ///
+# -*- mode: python; -*-
+# Several fake ONCE boxes from ONE once workflow, composed with wf `step` —
+# the multi-zookeeper idiom applied to the once example. Run from here:
+#   ./blue create --dry-run   |   ./blue create   |   ./blue delete
+#
+# Per-deployment graph (one once-wf run per once/deployments entry):
+#   compute -+                              +-> ansible-local  (~/.ssh/config)
+#            +-> dns -> smtp-post ----------+
+#   smtp ----+                              +-> ansible-remote (playbook)
+#
+# Higher-level graph (the composition layer):
+#   start -> deployment(once-wf) x N -> report
+#
+# Two things the parent swaps on the embedded steps, both the "re-add under
+# the same id" idiom (like multi-zookeeper swapping a child's backend):
+#   "once/provider"  digitalocean (child default) -> DATA-DRIVEN per
+#                    deployment (eu -> digitalocean, us -> oci), read from
+#                    the per-deployment "once/provider" value.
+#   "once/backend"   local (child default) -> S3, isolated by a
+#                    per-deployment + per-step key, so no two of the
+#                    2xN=8 tofu states collide.
+#
+# NOTE: the S3 backend is DEMONSTRATION-ONLY. `./blue create` needs a real
+# bucket + AWS credentials and will not run offline. The offline path is
+# `./blue create --dry-run`: the parent's dry-run advice is outermost, so it
+# skips each tofu step AND its `before` provider/backend advice — touching
+# nothing (no main.tf, no backend.tf, no S3).
+
+import os
+import sys
+from pathlib import Path
+
+from blue import dry_run, tofu
+from blue.cli import exec_cli, run_cli
+from blue.runtime import runtime
+from blue.scaffold import render_template, scaffold
+from blue.workflow import advice_add, step, workflow
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+cloudflare_tf = (SCRIPT_DIR / "resources/once/cloudflare/main.tf").read_text()
+do_tf = (SCRIPT_DIR / "resources/once/do/main.tf").read_text()
+oci_tf = (SCRIPT_DIR / "resources/once/oci/main.tf").read_text()
+playbook_yml = (SCRIPT_DIR / "resources/once/playbook.yml").read_text()
+smtp_post_tf = (SCRIPT_DIR / "resources/once/smtp-post/main.tf").read_text()
+smtp_tf = (SCRIPT_DIR / "resources/once/smtp/main.tf").read_text()
+ssh_config = (SCRIPT_DIR / "resources/once/ssh-config").read_text()
+
+# --- paths: one isolated tofu working dir per step, under work/<deployment> --
+# The parent's `in_` sets once/workdir to work/<name>, so server_dir becomes
+# work/eu/server, work/us/server, ... — deployments never share a dir.
+
+
+def example_path(p):
+    if p is None:
+        return None
+    return p if p.startswith("/") else f"{SCRIPT_DIR}/{p}"
+
+
+def workdir(opts):
+    return example_path(opts.get("once/workdir"))
+
+
+def step_dir(opts, nm):
+    return f"{workdir(opts)}/{nm}"
+
+
+def server_dir(opts):
+    return step_dir(opts, "server")
+
+
+def smtp_dir(opts):
+    return step_dir(opts, "smtp")
+
+
+def dns_dir(opts):
+    return step_dir(opts, "dns")
+
+
+def smtp_post_dir(opts):
+    return step_dir(opts, "smtp-post")
+
+
+# --- domain discovery from once/website ---------------------------------------
+
+
+def apex(hostname):
+    return ".".join(hostname.split(".")[-2:])
+
+
+def sending_domain(opts):
+    return f"notifications.{apex(opts['once/website'][0]['hostname'])}"
+
+
+# --- provider-swap advice (headline), now data-driven per deployment ----------
+# Same backend-as-advice idiom: a `before` advice that scaffolds the
+# provider-specific main.tf before `compute` runs. In multi-once the choice
+# is per-deployment DATA: the advice reads "once/provider" (set by the parent
+# `in_` from each deployment) and picks the matching mock. The advice is
+# uniform across branches; the data differs — downstream steps still never
+# learn which cloud produced the host.
+
+provider_templates = {
+    "digitalocean": {"name": "once/do/main.tf", "content": do_tf},
+    "oci": {"name": "once/oci/main.tf", "content": oci_tf},
+}
+
+
+def provider_advice(dir_fn):
+    def advice(opts):
+        tmpl = provider_templates.get(opts.get("once/provider")) or provider_templates[
+            "digitalocean"
+        ]
+        dir = dir_fn(opts)
+        os.makedirs(dir, exist_ok=True)
+        Path(f"{dir}/main.tf").write_text(
+            render_template(tmpl, {"host": opts["once/host"], "ssh": opts["once/ssh"]})
+        )
+        return opts
+
+    return advice
+
+
+# --- S3 backend config (demonstration-only) ------------------------------------
+# The bucket is shared, so isolation MUST come from a distinct key. We derive
+# it from BOTH the deployment name ("once/deployment") and the step's dir
+# segment, e.g. once/eu/server/…, once/us/smtp/… — 2 deployments x 4 tofu
+# steps = 8 separate state objects, none clobbering another. Swap to gcs by
+# re-adding "once/backend" with gcs_backend_advice and a per-step prefix.
+
+
+def s3_config(dir_fn):
+    def config(opts):
+        return {
+            "bucket": "once-tfstate",  # placeholder — needs a real bucket
+            "key": f"once/{opts['once/deployment']}/{dir_fn(opts).split('/')[-1]}/terraform.tfstate",
+            "region": "eu-west-1",
+        }
+
+    return config
+
+
+# --- tofu steps -------------------------------------------------------------------
+
+
+def start_step(opts):
+    return opts
+
+
+def compute_step(opts):
+    """compute is a bare tofu run: its main.tf is written by the
+    "once/provider" advice and its backend.tf by the "once/backend" advice,
+    both `before`."""
+    return tofu.tofu_step(opts, dir=server_dir(opts))
+
+
+async def tofu_with_spec(opts, dir, specs):
+    """Scaffold main.tf then apply (create); or destroy then remove main.tf
+    (delete). The zookeeper node-step pattern."""
+    if opts.get("blue/event") == "delete":
+        out = await tofu.tofu_step(opts, dir=dir)
+        return out if (out.get("blue/exit") or 0) > 0 else scaffold(out, specs)
+    return await tofu.tofu_step(scaffold(opts, specs), dir=dir)
+
+
+def smtp_step(opts):
+    dir = smtp_dir(opts)
+    specs = [
+        {
+            "template": {"name": "once/smtp/main.tf", "content": smtp_tf},
+            "target": f"{dir}/main.tf",
+            "data": {
+                "subdomain": sending_domain(opts),
+                "id": f"snd-{apex(opts['once/website'][0]['hostname']).replace('.', '-')}",
+                "username": "resend",
+                "password": "mock-smtp-secret",
+            },
+        }
+    ]
+    return tofu_with_spec(opts, dir, specs)
+
+
+def dns_step(opts):
+    """dns joins compute and smtp: it needs compute's ip and smtp's records.
+    It also carries the two provisioning outputs forward (once/server,
+    once/smtp) so smtp-post and the ansible steps can read them without
+    blue/branches."""
+    dir = dns_dir(opts)
+    outs = [b.get("tofu/outputs") for b in opts["blue/branches"]]
+    compute_out = next((o for o in outs if o and o.get("ip")), None)
+    smtp_out = next((o for o in outs if o and o.get("records")), None)
+    specs = [
+        {
+            "template": {"name": "once/cloudflare/main.tf", "content": cloudflare_tf},
+            "target": f"{dir}/main.tf",
+            "data": {
+                "ip": compute_out.get("ip") if compute_out else None,
+                "hostnames": [w["hostname"] for w in opts["once/website"]],
+                "email": smtp_out.get("records") if smtp_out else None,
+            },
+        }
+    ]
+    return tofu_with_spec(
+        {**opts, "once/server": compute_out, "once/smtp": smtp_out}, dir, specs
+    )
+
+
+def smtp_post_step(opts):
+    dir = smtp_post_dir(opts)
+    smtp_out = opts.get("once/smtp") or {}
+    specs = [
+        {
+            "template": {"name": "once/smtp-post/main.tf", "content": smtp_post_tf},
+            "target": f"{dir}/main.tf",
+            "data": {"id": smtp_out.get("id"), "subdomain": sending_domain(opts)},
+        }
+    ]
+    return tofu_with_spec(opts, dir, specs)
+
+
+# --- scaffold-only steps (no command) ----------------------------------------------
+
+
+def ansible_local_step(opts):
+    srv = opts.get("once/server") or {}
+    specs = [
+        {
+            "template": {"name": "once/ssh-config", "content": ssh_config},
+            "target": f"{workdir(opts)}/ansible-local/config",
+            "data": {
+                "name": srv.get("name"),
+                "ip": srv.get("ip"),
+                "sudoer": srv.get("sudoer"),
+                "identity": "~/.ssh/once_compute",
+            },
+        }
+    ]
+    return scaffold(opts, specs)
+
+
+def ansible_remote_step(opts):
+    specs = [
+        {
+            "template": {"name": "once/playbook.yml", "content": playbook_yml},
+            "target": f"{workdir(opts)}/ansible-remote/playbook.yml",
+            "data": {
+                "host": opts.get("once/server"),
+                "smtp": opts.get("once/smtp"),
+                "websites": opts["once/website"],
+                "deploy_key": (opts.get("once/ssh") or {}).get("deploy"),
+            },
+        }
+    ]
+    return scaffold(opts, specs)
+
+
+# --- the single-VPS once workflow (same shape as examples/once) ---------------
+# Ships digitalocean provider + local backend as its defaults, so it runs
+# standalone. The composition layer below re-adds "once/provider" and
+# "once/backend" to swap both — exactly how multi-zookeeper's parent can
+# replace cluster_wf's default backend.
+
+
+def once_wire_fn(s, _run_opts):
+    return {
+        "once/start": (start_step, "once/compute", "once/smtp"),
+        "once/compute": (compute_step, "once/dns"),
+        "once/smtp": (smtp_step, "once/dns"),
+        "once/dns": (dns_step, "once/smtp-post"),
+        "once/smtp-post": (smtp_post_step, "once/ansible-local", "once/ansible-remote"),
+        "once/ansible-local": (ansible_local_step,),
+        "once/ansible-remote": (ansible_remote_step,),
+    }.get(s)
+
+
+once_wf = workflow(start="once/start", wire_fn=once_wire_fn)
+once_wf = advice_add(once_wf, "once/compute", "before", "once/provider", provider_advice(server_dir))
+once_wf = advice_add(once_wf, "once/compute", "before", "once/backend", tofu.local_backend_advice(server_dir))
+once_wf = advice_add(once_wf, "once/smtp", "before", "once/backend", tofu.local_backend_advice(smtp_dir))
+once_wf = advice_add(once_wf, "once/dns", "before", "once/backend", tofu.local_backend_advice(dns_dir))
+once_wf = advice_add(once_wf, "once/smtp-post", "before", "once/backend", tofu.local_backend_advice(smtp_post_dir))
+
+# --- the composition layer: one once-wf run per deployment ---------------------
+
+
+def _deployment_in(opts):
+    d = opts["multi/deployment"]
+    # carry ambient keys by spreading opts (keeps blue/event, blue/dry-run,
+    # inherited advice), then project this deployment's fields into the once
+    # keys
+    return {
+        **opts,
+        "once/deployment": d["name"],  # -> S3 key + report
+        "once/provider": d["provider"],  # -> "once/provider" advice
+        "once/host": d["host"],
+        "once/ssh": d["ssh"],
+        "once/website": d["website"],
+        "once/workdir": f"{opts['once/workdir']}/{d['name']}",
+    }
+
+
+def _report_step(opts):
+    for b in opts["blue/branches"]:
+        runtime.log(
+            "deployment ready:",
+            b.get("once/deployment"),
+            "->",
+            b.get("once/workdir"),
+            f"({b.get('once/provider')})",
+        )
+    return opts
+
+
+def deployments_wire_fn(s, _run_opts):
+    return {
+        "multi/start": (start_step, "multi/deployment"),
+        "multi/deployment": (step(once_wf, in_=_deployment_in), "multi/report"),
+        "multi/report": (_report_step,),
+    }.get(s)
+
+
+def deployments_next_fn(s, default_next, opts):
+    if (opts.get("blue/exit") or 0) > 0:
+        return []
+    if s == "multi/start":
+        return [
+            ("multi/deployment", {**opts, "multi/deployment": d})
+            for d in opts["once/deployments"]
+        ]
+    return [(n, opts) for n in (default_next or [])]
+
+
+wf = workflow(start="multi/start", wire_fn=deployments_wire_fn, next_fn=deployments_next_fn)
+# provider swap (headline): replace the child's digitalocean default with a
+# data-driven pick, so eu -> digitalocean and us -> oci in one run. Same
+# "once/provider" id -> replaces the inherited child advice.
+wf = advice_add(wf, "once/compute", "before", "once/provider", provider_advice(server_dir))
+# backend swap: replace the child's local backend with S3, isolated by a
+# per-deployment + per-step key. Same "once/backend" id -> replaces each
+# child advice; whichever backend is active, the key keeps all 8 states
+# apart. (Demonstration-only: real `create` needs the bucket to exist.)
+wf = advice_add(wf, "once/compute", "before", "once/backend", tofu.s3_backend_advice(server_dir, s3_config(server_dir)))
+wf = advice_add(wf, "once/smtp", "before", "once/backend", tofu.s3_backend_advice(smtp_dir, s3_config(smtp_dir)))
+wf = advice_add(wf, "once/dns", "before", "once/backend", tofu.s3_backend_advice(dns_dir, s3_config(dns_dir)))
+wf = advice_add(wf, "once/smtp-post", "before", "once/backend", tofu.s3_backend_advice(smtp_post_dir, s3_config(smtp_post_dir)))
+# dry-run declared LAST at the parent, so "blue.dry-run/skip" gets the largest
+# seq and stays OUTERMOST over the re-added `before` provider/backend advice —
+# `./blue create --dry-run` then skips them too and touches nothing.
+# Inspect the composed stack with e.g. advice_plan([wf, once_wf], "once/compute")
+wf = dry_run.advise(
+    wf,
+    [
+        "once/compute",
+        "once/smtp",
+        "once/dns",
+        "once/smtp-post",
+        "once/ansible-local",
+        "once/ansible-remote",
+    ],
+)
+
+
+def file_arg(a):
+    return a in ("-f", "--file") or a.startswith("--file=")
+
+
+def default_args(args):
+    return args if any(file_arg(a) for a in args) else [*args, "-f", f"{SCRIPT_DIR}/blue.yml"]
+
+
+def run(*args):
+    """REPL/test-friendly entrypoint: resolves without calling sys.exit."""
+    return run_cli(wf, default_args(list(args)))
+
+
+if __name__ == "__main__":
+    exec_cli(wf, default_args(sys.argv[1:]))
