@@ -1,4 +1,5 @@
 #!/usr/bin/env -S uv run --script
+# -*- mode: python-ts; -*-
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["blue"]
@@ -6,7 +7,6 @@
 # [tool.uv.sources]
 # blue = { path = "../.." }
 # ///
-# -*- mode: python; -*-
 # Self-contained blue CLI for a fake ZooKeeper cluster.
 # Run from this directory:   ./blue create   |   ./blue delete
 #

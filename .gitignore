@@ -1,5 +1,6 @@
 .*
 !.gitignore
+!.nojekyll
 work/
 __pycache__/
 *.pyc

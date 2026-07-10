@@ -1,4 +1,5 @@
 #!/usr/bin/env -S uv run --script
+# -*- mode: python-ts; -*-
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["blue"]
@@ -6,7 +7,6 @@
 # [tool.uv.sources]
 # blue = { path = "../.." }
 # ///
-# -*- mode: python; -*-
 # Self-contained blue CLI for a REAL 3-node ZooKeeper cluster:
 # OpenTofu (AWS provider pointed at floci, a local AWS emulator) creates
 # one Docker-backed EC2 instance per node, and Ansible over SSH provisions
