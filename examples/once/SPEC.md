@@ -81,10 +81,10 @@ advice id to S3 and derives a distinct key per deployment and per step.
 
 ```text
 work/
-  server/        backend.tf main.tf terraform.tfstate
-  smtp/          backend.tf main.tf terraform.tfstate
-  dns/           backend.tf main.tf terraform.tfstate
-  smtp-post/     backend.tf main.tf terraform.tfstate
+  server/        backend.tf.json main.tf terraform.tfstate
+  smtp/          backend.tf.json main.tf terraform.tfstate
+  dns/           backend.tf.json main.tf terraform.tfstate
+  smtp-post/     backend.tf.json main.tf terraform.tfstate
   ansible-local/config
   ansible-remote/playbook.yml
 ```

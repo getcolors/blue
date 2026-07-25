@@ -121,7 +121,7 @@ def start_step(opts):
 
 def compute_step(opts):
     """compute is a bare tofu run: its main.tf is written by the
-    "once/provider" advice and its backend.tf by the "once/backend" advice,
+    "once/provider" advice and its backend.tf.json by the "once/backend" advice,
     both `before`."""
     return tofu.tofu_step(opts, dir=server_dir(opts))
 

@@ -182,7 +182,7 @@ async def test_fake_cluster_create_fans_out_joins_is_idempotent_delete_tears_dow
         dir = f"{work}/nodes/{server['id']}"
         assert os.path.exists(f"{dir}/main.tf")
         # advice wrote the backend
-        assert os.path.exists(f"{dir}/backend.tf")
+        assert os.path.exists(f"{dir}/backend.tf.json")
         # local backend state
         assert os.path.exists(f"{dir}/terraform.tfstate")
         cfg = Path(f"{dir}/zoo.cfg").read_text()

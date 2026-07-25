@@ -3,7 +3,7 @@
 # `tofu output -json` is merged into opts under a namespaced key
 # ("tofu/outputs" by default). The backend is not hardwired: attach a
 # `before` advice built by `backend_advice`, `local_backend_advice`,
-# `s3_backend_advice`, or `gcs_backend_advice` to write backend.tf before
+# `s3_backend_advice`, or `gcs_backend_advice` to write backend.tf.json before
 # the tofu command runs.
 
 from __future__ import annotations
@@ -62,17 +62,20 @@ async def tofu_step(opts: Opts, *, dir: str, output_key: str = "tofu/outputs") -
     return {**opts, "blue/exit": 0, output_key: await outputs(dir)}
 
 
-def _hcl_value(v: Any) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, (int, float)):
-        return str(v)
-    return json.dumps(str(v))
+def _json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _json_value(nested)
+            for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    return value
 
 
-def _backend_hcl(type: str, config: dict[str, Any]) -> str:
-    attrs = "".join(f"    {k} = {_hcl_value(v)}\n" for k, v in sorted(config.items()))
-    return f'terraform {{\n  backend "{type}" {{\n{attrs}  }}\n}}\n'
+def _backend_json(type: str, config: dict[str, Any]) -> str:
+    document = {"terraform": {"backend": {str(type): _json_value(config)}}}
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
 
 
 BackendConfig = dict | Callable[[Opts], dict]
@@ -85,14 +88,15 @@ def _resolve_config(config: BackendConfig, opts: Opts) -> dict[str, Any]:
 def backend_advice(dir_fn: Callable[[Opts], str], type: str, config: BackendConfig):
     """Build a `before` advice that writes a backend config into the directory
     returned by dir_fn(opts) before the step runs. `type` is the backend name
-    ("local", "s3", "gcs", …); `config` is a flat dict of backend attributes,
-    or a function of opts returning one."""
+    ("local", "s3", "gcs", …); `config` is a dict of backend attributes,
+    or a function of opts returning one. Dicts, sequences, booleans, numbers,
+    strings, and None retain their native JSON shape."""
 
     def advice(opts: Opts) -> Opts:
         dir = dir_fn(opts)
         os.makedirs(dir, exist_ok=True)
-        with open(os.path.join(dir, "backend.tf"), "w") as f:
-            f.write(_backend_hcl(type, _resolve_config(config, opts)))
+        with open(os.path.join(dir, "backend.tf.json"), "w") as f:
+            f.write(_backend_json(type, _resolve_config(config, opts)))
         return opts
 
     return advice

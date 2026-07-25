@@ -32,7 +32,7 @@
 # bucket + AWS credentials and will not run offline. The offline path is
 # `./blue create --dry-run`: the parent's dry-run advice is outermost, so it
 # skips each tofu step AND its `before` provider/backend advice — touching
-# nothing (no main.tf, no backend.tf, no S3).
+# nothing (no main.tf, no backend.tf.json, no S3).
 
 import os
 import sys
@@ -157,7 +157,7 @@ def start_step(opts):
 
 def compute_step(opts):
     """compute is a bare tofu run: its main.tf is written by the
-    "once/provider" advice and its backend.tf by the "once/backend" advice,
+    "once/provider" advice and its backend.tf.json by the "once/backend" advice,
     both `before`."""
     return tofu.tofu_step(opts, dir=server_dir(opts))
 

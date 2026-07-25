@@ -5,9 +5,10 @@ for building idempotent devops CLIs — desired state in YAML, workflows as step
 graphs threaded by a plain dict, template-scaffolded config files, OpenTofu
 and Ansible as the muscle.
 
-The port is **behavioral**: red's TypeScript test suite defines the contract,
-and this package ports it to pytest. Conventions stay structurally identical —
-a red project ports to blue by mechanical rename.
+The port is **behavioral**: green is the canonical model, and this package
+locks its Python behavior into pytest while preserving red-compatible APIs.
+Conventions stay structurally identical — a red project ports to blue by
+mechanical rename.
 
 ## Naming
 
@@ -129,7 +130,8 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   `apply` and merges `tofu output -json` under `"tofu/outputs"` by default.
   `"delete"` runs `init` + `destroy`. Backends are `before` advice
   (`local_backend_advice`, `s3_backend_advice`, `gcs_backend_advice`,
-  `backend_advice`).
+  `backend_advice`) that writes `backend.tf.json` while preserving native JSON
+  values and nested collections.
 
 - `ansible.py` — event-aware Ansible steps. Non-`"delete"` runs the create
   playbook, `"delete"` the delete playbook. Parses PLAY RECAP under
@@ -170,8 +172,8 @@ unpinned.
 
 ## Conventions
 
-Same as red's (see the repository `SPEC.md`), with `blue/*` in place of
-`red/*`:
+Same as red's behavioral contract, with `blue/*` in place of `red/*`; see this
+repository's [`index.html`](index.html) specification:
 
 - All cross-step state is one open dict. Engine keys are `blue/*` and private
   `blue.*/*`; project/library keys are namespace-like strings such as

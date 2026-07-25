@@ -76,7 +76,7 @@
   <li><strong>Everything is one dict.</strong> Desired state is YAML loaded into <code>opts</code>. Every step reads and returns that plain dict, possibly enriched with observed reality such as OpenTofu outputs or Ansible recaps.</li>
   <li><strong>Idempotent apply.</strong> There is no plan phase in blue itself. Re-running the same event should converge. <code>create</code> and <code>delete</code> are conventions; the event set is open.</li>
   <li><strong>Errors are values.</strong> Steps report outcome with <code>"blue/exit"</code>. Raised exceptions are caught at step boundaries and converted into opts values, so failures can route through <code>next_fn</code> and joins like any other result.</li>
-  <li><strong>Python/uv only.</strong> blue is the uv/Python implementation of the green workflow model and the behavioral port of red's TypeScript/Bun contract. A red project ports mechanically by replacing red names with blue names and TypeScript modules with Python modules.</li>
+  <li><strong>Python/uv only.</strong> blue is the uv/Python implementation of green's canonical workflow model while preserving red-compatible APIs. A red project ports mechanically by replacing red names with blue names and TypeScript modules with Python modules.</li>
 </ul>
 
 <h2 id="naming">2. Naming, desired state &amp; the opts contract</h2>
@@ -311,7 +311,7 @@ async def apply_node(opts: Opts) -&gt; Opts:
   <li>Non-zero process exits become <code>"blue/exit"</code> and <code>"blue/err"</code>.</li>
   <li>All subprocesses go through <code>runtime.exec</code>, which tests can stub.</li>
 </ul>
-<p>Backends are not hardwired. <code>backend_advice</code> writes <code>backend.tf</code> for any backend type and flat config dict (or function of opts). Helpers ship for local, S3, and GCS.</p>
+<p>Backends are not hardwired. <code>backend_advice</code> writes <code>backend.tf.json</code> for any backend type and config dict (or function of opts), preserving native JSON values and nested collections. Helpers ship for local, S3, and GCS.</p>
 <pre><code>wf = advice_add(
     wf,
     "zk/tofu",
@@ -491,7 +491,7 @@ cd ../floci-zookeeper
 <tr><td><code>scaffold</code></td><td><code>(opts, specs) -&gt; opts</code>; create or delete rendered targets.</td></tr>
 <tr><td><code>tofu.outputs</code></td><td><code>await outputs(dir) -&gt; dict</code>; parse <code>tofu output -json</code>.</td></tr>
 <tr><td><code>tofu.tofu_step</code></td><td><code>await tofu_step(opts, dir=..., output_key="tofu/outputs") -&gt; Opts</code>.</td></tr>
-<tr><td><code>tofu.backend_advice</code></td><td><code>(dir_fn, type, config) -&gt; before_advice</code>; write <code>backend.tf</code>.</td></tr>
+<tr><td><code>tofu.backend_advice</code></td><td><code>(dir_fn, type, config) -&gt; before_advice</code>; write <code>backend.tf.json</code>.</td></tr>
 <tr><td><code>tofu.local_backend_advice</code></td><td><code>(dir_fn, config=None) -&gt; before_advice</code>.</td></tr>
 <tr><td><code>tofu.s3_backend_advice</code></td><td><code>(dir_fn, config) -&gt; before_advice</code>.</td></tr>
 <tr><td><code>tofu.gcs_backend_advice</code></td><td><code>(dir_fn, config) -&gt; before_advice</code>.</td></tr>
