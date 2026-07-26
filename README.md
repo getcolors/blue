@@ -115,7 +115,8 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
 
 - `renderer.py` — small internal Selmer-compatible renderer used by
   scaffolding. Supports variables, dotted paths, missing values as empty,
-  HTML escaping by default, `safe`, `sort(attribute='...')`, `for` loops, and
+  HTML escaping by default, `safe`, `not-empty`, `sort(attribute='...')`,
+  `for` loops, `if` blocks, and
   delimiter overrides (`tag_open`/`tag_close`/`filter_open`/`filter_close`)
   for templates that must preserve Jinja2 `{{ }}` / `{% %}`.
 
@@ -130,8 +131,9 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   `apply` and merges `tofu output -json` under `"tofu/outputs"` by default.
   `"delete"` runs `init` + `destroy`. Backends are `before` advice
   (`local_backend_advice`, `s3_backend_advice`, `gcs_backend_advice`,
-  `backend_advice`) that writes `backend.tf.json` while preserving native JSON
-  values and nested collections.
+  `r2_backend_advice`, `backend_advice`). Commands accept per-run environments;
+  `tofu_with_spec` supports build, and deterministic HCL/JSON helpers match
+  Green's bytes.
 
 - `ansible.py` — event-aware Ansible steps. Non-`"delete"` runs the create
   playbook, `"delete"` the delete playbook. Parses PLAY RECAP under
@@ -146,9 +148,9 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
 
 - `cli.py` — `run_cli` / `exec_cli`: parses `./blue <event> [-f blue.yml]
   [--start step] [--end step] [--dry-run]`, loads YAML with 1.2 core-schema
-  booleans (`no` is a string; `zk/…` keys parse unquoted), stamps
-  `"blue/event"`, and runs the workflow. Exit 2 is reserved for usage/config
-  errors.
+  booleans (`no` is a string; `zk/…` keys parse unquoted), overlays
+  `BLUE_PAR_*`, stamps `"blue/event"`, and runs the workflow. Exit 2 is
+  reserved for usage/config errors.
 
 - `gates.py` — pydantic schema gates for `before-while` (the port of red's
   Zod gates). Gates validate and return the original opts; they must never
@@ -156,8 +158,8 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   keys. Functional-syntax `TypedDict`s carry namespaced string keys.
 
 - `runtime.py` — mutable test seam for subprocesses and log lines. All
-  command execution goes through `runtime.exec` (asyncio subprocesses); tests
-  stub it instead of shelling out.
+  command execution goes through `runtime.exec` with per-command environments
+  and timeouts; tests stub it instead of shelling out.
 
 ## The ./blue launcher
 

@@ -1,6 +1,6 @@
 import itertools
 
-from blue.cli import run_cli
+from blue.cli import par_name, read_pars, run_cli
 from blue.workflow import workflow
 
 _n = itertools.count()
@@ -74,6 +74,18 @@ async def test_usage_errors_exit_2(tmp_path):
     # unknown flag
     bad_flag = await run_cli(probe_wf(), ["create", "--bogus"])
     assert bad_flag["blue/exit"] == 2
+
+
+def test_blue_par_overlays_flat_keys_with_type_coercion():
+    assert par_name("compute-prevent-destroy") == "BLUE_PAR_COMPUTE_PREVENT_DESTROY"
+    assert read_pars(
+        {"compute-prevent-destroy": True, "port": 1},
+        {
+            "BLUE_PAR_COMPUTE_PREVENT_DESTROY": "false",
+            "BLUE_PAR_PORT": "587",
+            "BLUE_PAR_TOKEN": "x",
+        },
+    ) == {"compute-prevent-destroy": False, "port": 587, "token": "x"}
 
 
 async def test_namespaced_keys_and_yaml_1_2_semantics_survive_the_load(tmp_path):

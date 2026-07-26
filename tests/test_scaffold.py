@@ -82,6 +82,16 @@ def test_renderer_supports_escaping_safe_loops_sort_and_missing_values():
     )
 
 
+def test_renderer_supports_if_and_not_empty_with_custom_delimiters():
+    template = {
+        "name": "inline-if",
+        "content": "<% if value|not-empty %><{ value }><% else %>none<% endif %>",
+    }
+    opts = {"tag_open": "<", "tag_close": ">", "filter_open": "{", "filter_close": "}"}
+    assert render_template(template, {"value": "yes"}, opts) == "yes"
+    assert render_template(template, {"value": ""}, opts) == "none"
+
+
 def test_a_template_without_content_throws_with_context():
     with pytest.raises(StepError, match="template not found"):
         scaffold(

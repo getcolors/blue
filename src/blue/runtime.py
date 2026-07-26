@@ -17,7 +17,10 @@ class ExecResult:
 
 
 async def _spawn_exec(
-    cmd: list[str], cwd: str | None = None, env: dict[str, str | None] | None = None
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str | None] | None = None,
+    timeout_ms: int | None = None,
 ) -> ExecResult:
     try:
         full_env = None
@@ -31,7 +34,20 @@ async def _spawn_exec(
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,
         )
-        out, err = await proc.communicate()
+        try:
+            out, err = await asyncio.wait_for(
+                proc.communicate(), None if timeout_ms is None else timeout_ms / 1000
+            )
+        except TimeoutError:
+            proc.kill()
+            out, err = await proc.communicate()
+            timeout = f"command timed out after {timeout_ms}ms"
+            captured = err.decode()
+            return ExecResult(
+                exit=-1,
+                out=out.decode(),
+                err=f"{captured}\n{timeout}" if captured else timeout,
+            )
         return ExecResult(exit=proc.returncode or 0, out=out.decode(), err=err.decode())
     except OSError as e:
         # command not found and similar spawn failures follow the same shape

@@ -3,8 +3,8 @@
 # Supported:
 # - Variables with dotted paths: {{name}}, {{node.id}}; missing values -> "".
 # - HTML escaping by default; the `safe` filter bypasses escaping.
-# - `for` loops: {% for x in xs %}...{% endfor %}; loops may nest.
-# - Filter pipelines, currently `safe` and `sort(attribute='field')`.
+# - `for` loops and `if` blocks; blocks may nest.
+# - Filter pipelines: `safe`, `not-empty`, and `sort(attribute='field')`.
 # - Selmer-style delimiter overrides: tag_open/tag_close/filter_open/
 #   filter_close are single-character pieces. Defaults make variables {{ }}
 #   and tags {% %}; e.g. {"tag_open": "<", "tag_close": ">",
@@ -197,6 +197,11 @@ def _apply_filter(value: Any, safe: bool, filter_expr: str) -> tuple[Any, bool]:
         return value, True
     if name == "sort":
         return _sort_value(value, filter_expr), safe
+    if name == "not-empty":
+        try:
+            return (value if value is not None and len(value) > 0 else None), safe
+        except TypeError:
+            return value, safe
     # Unknown filters are deliberately conservative: keep the value as-is.
     # This mirrors the renderer's small-subset role without corrupting data.
     return value, safe
@@ -240,6 +245,47 @@ def _parse_for(tag: str) -> tuple[str, str] | None:
     if not m:
         return None
     return m.group(1), m.group(2).strip()
+
+
+def _parse_if(tag: str) -> str | None:
+    m = re.match(r"^if\s+(.+)$", tag.strip(), re.S)
+    return m.group(1).strip() if m else None
+
+
+def _truthy(value: Any) -> bool:
+    return value is not None and value is not False
+
+
+def _find_matching_if(
+    content: str, body_start: int, d: _Delimiters
+) -> tuple[int, int | None, int | None, int]:
+    depth = 1
+    idx = body_start
+    else_tag: tuple[int, int] | None = None
+    while idx < len(content):
+        tag_start = content.find(d.tag_open, idx)
+        if tag_start < 0:
+            break
+        content_start = tag_start + len(d.tag_open)
+        tag_end = content.find(d.tag_close, content_start)
+        if tag_end < 0:
+            break
+        tag = content[content_start:tag_end].strip()
+        if _parse_if(tag):
+            depth += 1
+        elif tag == "endif":
+            depth -= 1
+            if depth == 0:
+                return (
+                    else_tag[0] if else_tag else tag_start,
+                    else_tag[1] if else_tag else None,
+                    tag_start if else_tag else None,
+                    tag_end + len(d.tag_close),
+                )
+        elif tag == "else" and depth == 1:
+            else_tag = (tag_start, tag_end + len(d.tag_close))
+        idx = tag_end + len(d.tag_close)
+    raise ValueError("unterminated if block in template")
 
 
 def _find_matching_endfor(content: str, body_start: int, d: _Delimiters) -> tuple[int, int]:
@@ -300,6 +346,7 @@ def _render_block(content: str, ctx: dict, d: _Delimiters) -> str:
                 break
             tag = content[tag_start:tag_end].strip()
             loop = _parse_for(tag)
+            condition = _parse_if(tag)
             if loop:
                 name, expr = loop
                 body_start = tag_end + len(d.tag_close)
@@ -309,10 +356,23 @@ def _render_block(content: str, ctx: dict, d: _Delimiters) -> str:
                 for item in _to_iterable(value):
                     out.append(_render_block(body, {**ctx, name: item}, d))
                 idx = after_end
+            elif condition:
+                body_start = tag_end + len(d.tag_close)
+                then_end, else_start, else_end, after_end = _find_matching_if(
+                    content, body_start, d
+                )
+                value, _safe = _eval_expr(condition, ctx)
+                if _truthy(value):
+                    body = content[body_start:then_end]
+                elif else_start is not None and else_end is not None:
+                    body = content[else_start:else_end]
+                else:
+                    body = ""
+                out.append(_render_block(body, ctx, d))
+                idx = after_end
             else:
-                # The matching endfor is consumed by the loop handler; a stray
-                # one is ignored. Unsupported tags render empty rather than
-                # leaking template syntax into generated infrastructure config.
+                # Matching closing tags are consumed by their block handlers.
+                # Unsupported tags render empty rather than leaking syntax.
                 idx = tag_end + len(d.tag_close)
     return "".join(out)
 

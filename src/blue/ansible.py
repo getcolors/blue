@@ -97,14 +97,14 @@ async def ansible_step(
 
 
 async def ansible_with_spec(opts: Opts, specs: list[dict], **config: Any) -> Opts:
-    """Scaffold ansible config files (playbooks, ansible.cfg, …) then run
-    ansible-playbook (create); or run ansible-playbook then remove the
-    scaffolded files (delete). Mirrors the tofu-with-spec pattern. `config`
-    keywords are `ansible_step`'s."""
+    """Render-only for build; render/run/remove safely for delete."""
+    if opts.get("blue/event") == "build":
+        return scaffold(opts, specs)
     if opts.get("blue/event") == "delete":
-        ran = await ansible_step(opts, **config)
-        exit = ran.get("blue/exit")
-        return ran if (exit if exit is not None else 0) > 0 else scaffold(ran, specs)
+        rendered = scaffold({**opts, "blue/event": "create"}, specs)
+        ran = await ansible_step({**rendered, "blue/event": "delete"}, **config)
+        exit_code = ran.get("blue/exit") or 0
+        return ran if exit_code > 0 else scaffold(ran, specs)
     return await ansible_step(scaffold(opts, specs), **config)
 
 

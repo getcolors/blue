@@ -16,6 +16,34 @@ import yaml
 from .workflow import Opts, Workflow, run
 
 USAGE = "Usage: blue <event> [-f|--file blue.yml] [--start step] [--end step] [--dry-run]"
+_PAR_PREFIX = "BLUE_PAR_"
+
+
+def par_name(key: str) -> str:
+    return _PAR_PREFIX + str(key).upper().replace("-", "_")
+
+
+def _coerce(old: object, value: str) -> object:
+    if isinstance(old, bool):
+        if value.lower() == "true":
+            return True
+        if value.lower() == "false":
+            return False
+    if isinstance(old, int) and not isinstance(old, bool):
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    return value
+
+
+def read_pars(opts: Opts, env: dict[str, str] | None = None) -> Opts:
+    result = dict(opts)
+    for name, value in (os.environ if env is None else env).items():
+        if name.startswith(_PAR_PREFIX) and len(name) > len(_PAR_PREFIX):
+            key = name[len(_PAR_PREFIX) :].lower().replace("_", "-")
+            result[key] = _coerce(result.get(key), value)
+    return result
 
 
 class _UsageError(Exception):
@@ -84,7 +112,7 @@ async def run_cli(workflow: Workflow, args: list[str]) -> Opts:
         if not os.path.exists(values["file"]):
             return {"blue/exit": 2, "blue/err": f"desired state file not found: {values['file']}"}
         with open(values["file"]) as f:
-            state = load_yaml(f.read())
+            state = read_pars(load_yaml(f.read()))
         wf = replace(
             workflow,
             **({"start": values["start"]} if values["start"] else {}),
