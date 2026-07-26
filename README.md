@@ -149,7 +149,7 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
 - `cli.py` — `run_cli` / `exec_cli`: parses `./blue <event> [-f blue.yml]
   [--start step] [--end step] [--dry-run]`, loads YAML with 1.2 core-schema
   booleans (`no` is a string; `zk/…` keys parse unquoted), overlays
-  `BLUE_PAR_*`, stamps `"blue/event"`, and runs the workflow. Exit 2 is
+  `COLORS_PAR_*`, stamps `"blue/event"`, and runs the workflow. Exit 2 is
   reserved for usage/config errors.
 
 - `gates.py` — pydantic schema gates for `before-while` (the port of red's

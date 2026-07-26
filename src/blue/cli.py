@@ -16,7 +16,10 @@ import yaml
 from .workflow import Opts, Workflow, run
 
 USAGE = "Usage: blue <event> [-f|--file blue.yml] [--start step] [--end step] [--dry-run]"
-_PAR_PREFIX = "BLUE_PAR_"
+
+# The parameter namespace every colour shares, so one variable serves green,
+# red and blue without naming any of them.
+_PAR_PREFIX = "COLORS_PAR_"
 
 
 def par_name(key: str) -> str:
@@ -75,16 +78,18 @@ def _parse_args(args: list[str]) -> tuple[dict, list[str]]:
     return values, positionals
 
 
-# PyYAML parses YAML 1.1, where unquoted `no`/`yes`/`on`/`off` are booleans.
-# blue documents YAML 1.2 core-schema semantics (matching red's Bun.YAML):
-# only true/false variants are booleans, so a loader with the 1.1 bool
-# resolver replaced is used.
+# PyYAML parses YAML 1.1, where unquoted `no`/`yes`/`on`/`off` are booleans and
+# an integer may be octal by leading zero (`012` is 10) or sexagesimal by colon
+# (`1:30` is 90). blue documents YAML 1.2 core-schema semantics (matching red's
+# Bun.YAML), so both the bool and int resolvers are replaced: only true/false
+# variants are booleans, and an integer is decimal unless prefixed 0o or 0x.
 class _CoreLoader(yaml.SafeLoader):
     pass
 
 
+_REPLACED = ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:int")
 _CoreLoader.yaml_implicit_resolvers = {
-    key: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+    key: [(tag, regexp) for tag, regexp in resolvers if tag not in _REPLACED]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _CoreLoader.add_implicit_resolver(
@@ -92,6 +97,29 @@ _CoreLoader.add_implicit_resolver(
     re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
     list("tTfF"),
 )
+_CoreLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:int",
+    re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
+    list("-+0123456789"),
+)
+
+
+def _construct_core_int(loader: yaml.SafeLoader, node: yaml.Node) -> int:
+    """PyYAML's own int constructor reads a leading zero as octal even when the
+    resolver above has already accepted the scalar as decimal, so the base has
+    to be decided here too: only an explicit 0o or 0x prefix leaves base ten."""
+    text = str(loader.construct_scalar(node))
+    sign = -1 if text.startswith("-") else 1
+    digits = text.lstrip("-+")
+    prefix = digits[:2].lower()
+    if prefix == "0o":
+        return sign * int(digits[2:], 8)
+    if prefix == "0x":
+        return sign * int(digits[2:], 16)
+    return sign * int(digits, 10)
+
+
+_CoreLoader.add_constructor("tag:yaml.org,2002:int", _construct_core_int)
 
 
 def load_yaml(text: str) -> Opts:
@@ -111,8 +139,14 @@ async def run_cli(workflow: Workflow, args: list[str]) -> Opts:
             return {"blue/exit": 2, "blue/err": USAGE}
         if not os.path.exists(values["file"]):
             return {"blue/exit": 2, "blue/err": f"desired state file not found: {values['file']}"}
+        # "blue/state-file" is the absolute path the state came from, so a
+        # project can resolve its own relative paths against the file rather
+        # than against whatever directory the command happened to run in.
         with open(values["file"]) as f:
-            state = read_pars(load_yaml(f.read()))
+            state = read_pars({
+                **load_yaml(f.read()),
+                "blue/state-file": os.path.abspath(values["file"]),
+            })
         wf = replace(
             workflow,
             **({"start": values["start"]} if values["start"] else {}),

@@ -1,6 +1,6 @@
 import itertools
 
-from blue.cli import par_name, read_pars, run_cli
+from blue.cli import load_yaml, par_name, read_pars, run_cli
 from blue.workflow import workflow
 
 _n = itertools.count()
@@ -76,16 +76,35 @@ async def test_usage_errors_exit_2(tmp_path):
     assert bad_flag["blue/exit"] == 2
 
 
-def test_blue_par_overlays_flat_keys_with_type_coercion():
-    assert par_name("compute-prevent-destroy") == "BLUE_PAR_COMPUTE_PREVENT_DESTROY"
+def test_colors_par_overlays_flat_keys_with_type_coercion():
+    assert par_name("compute-prevent-destroy") == "COLORS_PAR_COMPUTE_PREVENT_DESTROY"
     assert read_pars(
         {"compute-prevent-destroy": True, "port": 1},
         {
-            "BLUE_PAR_COMPUTE_PREVENT_DESTROY": "false",
-            "BLUE_PAR_PORT": "587",
-            "BLUE_PAR_TOKEN": "x",
+            "COLORS_PAR_COMPUTE_PREVENT_DESTROY": "false",
+            "COLORS_PAR_PORT": "587",
+            "COLORS_PAR_TOKEN": "x",
         },
     ) == {"compute-prevent-destroy": False, "port": 587, "token": "x"}
+
+
+def test_integers_follow_the_1_2_core_schema():
+    # YAML 1.1 would read 012 as octal 10 and 1:30 as sexagesimal 90; both the
+    # resolver and the constructor have to be replaced to get base ten.
+    loaded = load_yaml("a: 012\nb: 1:30\nc: 0o17\nd: 0x1f\ne: -012\n")
+    assert loaded == {"a": 12, "b": "1:30", "c": 15, "d": 31, "e": -12}
+
+
+def test_no_colour_keeps_a_prefix_of_its_own():
+    assert read_pars(
+        {},
+        {
+            "GREEN_PAR_DO_TOKEN": "tok",
+            "RED_PAR_DO_TOKEN": "tok",
+            "BLUE_PAR_DO_TOKEN": "tok",
+            "ONCE_PAR_DO_TOKEN": "tok",
+        },
+    ) == {}
 
 
 async def test_namespaced_keys_and_yaml_1_2_semantics_survive_the_load(tmp_path):
