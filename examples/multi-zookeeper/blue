@@ -128,7 +128,7 @@ def _report_step(opts):
 def clusters_wire_fn(s, _run_opts):
     return {
         "clusters/start": (start_step, "clusters/cluster"),
-        "clusters/cluster": (step(cluster_wf, in_=_cluster_in), "clusters/report"),
+        "clusters/cluster": (step(cluster_wf, in_fn=_cluster_in), "clusters/report"),
         "clusters/report": (_report_step,),
     }.get(s)
 

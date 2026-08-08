@@ -100,7 +100,7 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   collapse and propagate the worst exit. The step boundary deep-freezes input
   (`FrozenDict`/`FrozenList` raise on mutation), catches raised exceptions,
   rejects non-dict returns, stamps `"blue/step"`, and removes private
-  inherited-advice state from results. `step(wf, in_=..., out=...)` embeds
+  inherited-advice state from results. `step(wf, in_fn=..., out_fn=...)` embeds
   workflows as ordinary steps.
 
 - `advice.py` — Emacs `nadvice`-style combinators: `around`, `before`,

@@ -169,12 +169,12 @@ result = await run(wf, {"blue/event": "create"})</code></pre>
 <h3>Composition — a workflow is a step</h3>
 <pre><code>step(sub_workflow)
 step(sub_workflow,
-     in_=lambda opts: sub_opts,
-     out=lambda opts, sub_result: parent_result)</code></pre>
+     in_fn=lambda opts: sub_opts,
+     out_fn=lambda opts, sub_result: parent_result)</code></pre>
 <ul>
   <li>The sub-workflow's result is just a step result, so failures propagate through parent routing naturally.</li>
-  <li>With default <code>in_</code>, ambient keys such as <code>"blue/event"</code> and <code>"blue/dry-run"</code> flow into the child. If custom <code>in_</code> builds opts from scratch, carry the ambient keys the child needs.</li>
-  <li>Advice inheritance is preserved even when <code>in_</code> rebuilds opts from scratch. This lets a parent impose dry-run, backend, audit, or provider advice on embedded workflows by flat step name.</li>
+  <li>With default <code>in_fn</code>, ambient keys such as <code>"blue/event"</code> and <code>"blue/dry-run"</code> flow into the child. If custom <code>in_fn</code> builds opts from scratch, carry the ambient keys the child needs.</li>
+  <li>Advice inheritance is preserved even when <code>in_fn</code> rebuilds opts from scratch. This lets a parent impose dry-run, backend, audit, or provider advice on embedded workflows by flat step name.</li>
 </ul>
 
 <h3>Slices</h3>
@@ -475,7 +475,7 @@ cd ../floci-zookeeper
 <tr><th>Function / export</th><th>Signature / purpose</th></tr>
 <tr><td><code>workflow</code></td><td><code>workflow(start, wire_fn, end=None, next_fn=None) -&gt; Workflow</code>; <code>wire_fn</code> is <code>(step, run_opts) -&gt; (fn, *next)</code>.</td></tr>
 <tr><td><code>run</code></td><td><code>await run(workflow, opts) -&gt; Opts</code>; runs the scheduler and returns final opts.</td></tr>
-<tr><td><code>step</code></td><td><code>step(workflow, in_=None, out=None) -&gt; StepFn</code>; embeds a workflow as an ordinary step.</td></tr>
+<tr><td><code>step</code></td><td><code>step(workflow, in_fn=None, out_fn=None) -&gt; StepFn</code>; embeds a workflow as an ordinary step.</td></tr>
 <tr><td><code>StepError</code></td><td>Error subclass with <code>exit</code>; raise to choose a step failure exit code.</td></tr>
 <tr><td><code>failed</code></td><td><code>failed(opts) -&gt; bool</code>; true when <code>"blue/exit"</code> is positive.</td></tr>
 <tr><td><code>advice_add</code></td><td><code>(workflow, step, how, id, fn, props=None) -&gt; Workflow</code>.</td></tr>

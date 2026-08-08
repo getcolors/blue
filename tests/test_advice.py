@@ -434,14 +434,14 @@ async def test_inheritance_survives_a_scoping_in_fn():
     parent = advice_add(
         workflow(
             start="p/sub",
-            wire_fn=lambda s, _: (step(single_step_wf(), in_=lambda o: {"n": o["n"]}),),
+            wire_fn=lambda s, _: (step(single_step_wf(), in_fn=lambda o: {"n": o["n"]}),),
         ),
         "t/step",
         "filter-return",
         "test/p",
         lambda o: log(o, "p"),
     )
-    # in_ built sub-opts from scratch; the engine re-stamped the registry
+    # in_fn built sub-opts from scratch; the engine re-stamped the registry
     assert (await run(parent, {"n": 1}))["log"] == ["base", "p"]
 
 

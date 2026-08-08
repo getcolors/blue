@@ -277,21 +277,21 @@ async def test_sub_workflow_failure_halts_the_parent():
     assert "seen" not in res
 
 
-async def test_step_in_out_scope_the_sub_workflow():
+async def test_step_in_fn_out_fn_scope_the_sub_workflow():
     sub = workflow(start="s/a", wire_fn=lambda s, _: (lambda o: {**o, "result": 2 * o["n"]},))
     parent = workflow(
         start="p/sub",
         wire_fn=lambda s, _: (
             step(
                 sub,
-                in_=lambda o: {"blue/event": o["blue/event"], "n": o["parentN"]},
-                out=lambda o, r: {**o, "doubled": r["result"]},
+                in_fn=lambda o: {"blue/event": o["blue/event"], "n": o["parentN"]},
+                out_fn=lambda o, r: {**o, "doubled": r["result"]},
             ),
         ),
     )
     res = await run(parent, {"blue/event": "create", "parentN": 21, "keepMe": "yes"})
     assert res["doubled"] == 42
-    # out preserved the parent opts
+    # out_fn preserved the parent opts
     assert res["keepMe"] == "yes"
 
 

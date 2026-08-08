@@ -110,7 +110,7 @@ desired_state = {
 
 # --- composition: two clusters from the same workflow -----------------------------
 # `step` turns cluster_wf into an ordinary step; the parent fans it out once
-# per cluster (in parallel), scoping each run with `in_`.
+# per cluster (in parallel), scoping each run with `in_fn`.
 
 
 def _cluster_in(opts):
@@ -141,7 +141,7 @@ two_clusters_wf = workflow(
     start="clusters/start",
     wire_fn=lambda s, _: {
         "clusters/start": (start_step, "clusters/cluster"),
-        "clusters/cluster": (step(cluster_wf, in_=_cluster_in), "clusters/report"),
+        "clusters/cluster": (step(cluster_wf, in_fn=_cluster_in), "clusters/report"),
         "clusters/report": (_report_step,),
     }.get(s),
     next_fn=_clusters_next_fn,

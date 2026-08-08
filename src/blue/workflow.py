@@ -626,8 +626,8 @@ async def _scheduler_step(
 def step(
     wf: Workflow,
     *,
-    in_: Callable[[Opts], Opts] | None = None,
-    out: Callable[[Opts, Opts], Opts] | None = None,
+    in_fn: Callable[[Opts], Opts] | None = None,
+    out_fn: Callable[[Opts, Opts], Opts] | None = None,
 ) -> StepFn:
     """Turn a workflow into a step function (opts -> awaitable opts), so
     workflows compose into higher-level workflows: wire the result like any
@@ -637,23 +637,25 @@ def step(
 
     The enclosing run's advice is inherited: the nested run merges it over
     the sub-workflow's own. The engine re-stamps the inherited registry after
-    `in_` runs, so `in_` may build sub-opts from scratch without severing
+    `in_fn` runs, so `in_fn` may build sub-opts from scratch without severing
     inheritance.
 
     Options:
-      in_: (opts) -> sub_opts        — shape the opts entering the sub-workflow
-      out: (opts, sub_result) -> opts — merge the sub-result back into the
-                                        parent's opts (default: the sub-result
-                                        itself is the step's result)
+      in_fn: (opts) -> sub_opts         — shape the opts entering the
+                                          sub-workflow
+      out_fn: (opts, sub_result) -> opts — merge the sub-result back into the
+                                           parent's opts (default: the
+                                           sub-result itself is the step's
+                                           result)
     """
 
     async def f(o: Opts) -> Opts:
         inherited = o.get(INHERITED)
-        sub_opts = in_(o) if in_ else o
+        sub_opts = in_fn(o) if in_fn else o
         if inherited is not None:
             sub_opts = {**sub_opts, INHERITED: inherited}
         result = await run(wf, sub_opts)
-        return out(o, result) if out else result
+        return out_fn(o, result) if out_fn else result
 
     return f
 
