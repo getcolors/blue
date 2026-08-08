@@ -269,7 +269,7 @@ class FrozenList(list):
     reverse = _frozen
 
 
-def deep_freeze(x: Any, _memo: dict | None = None) -> Any:
+def _deep_freeze(x: Any, _memo: dict | None = None) -> Any:
     memo = _memo if _memo is not None else {}
     if isinstance(x, dict):
         if id(x) in memo:
@@ -277,7 +277,7 @@ def deep_freeze(x: Any, _memo: dict | None = None) -> Any:
         fd = FrozenDict()
         memo[id(x)] = fd
         for k, v in x.items():
-            dict.__setitem__(fd, k, deep_freeze(v, memo))
+            dict.__setitem__(fd, k, _deep_freeze(v, memo))
         return fd
     if isinstance(x, list):
         if id(x) in memo:
@@ -285,7 +285,7 @@ def deep_freeze(x: Any, _memo: dict | None = None) -> Any:
         fl = FrozenList()
         memo[id(x)] = fl
         for v in x:
-            list.append(fl, deep_freeze(v, memo))
+            list.append(fl, _deep_freeze(v, memo))
         return fl
     return x
 
@@ -352,7 +352,7 @@ async def _run_step(wf: Workflow, step: str, run_opts: Opts, opts: Opts) -> Opts
         f = decl[0] if decl else None
         if not callable(f):
             raise StepError(f"no function wired for step {step}")
-        input_opts = deep_freeze({**opts, INHERITED: _inherited_payload(wf), "blue/step": step})
+        input_opts = _deep_freeze({**opts, INHERITED: _inherited_payload(wf), "blue/step": step})
         ret = await _advice.compose(f, _step_advice(wf, step))(input_opts)
         if not _is_plain_map(ret):
             raise StepError(f"step {step} returned a non-map: {ret!r}")
