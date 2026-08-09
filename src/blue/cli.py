@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 import yaml
 
@@ -128,14 +129,38 @@ def load_yaml(text: str) -> Opts:
     return yaml.load(text, Loader=_CoreLoader) or {}
 
 
-async def run_cli(workflow: Workflow, args: list[str]) -> Opts:
+def find_up(name: str, start: str | None = None) -> str | None:
+    directory = Path(start or os.getcwd()).resolve()
+    while True:
+        candidate = directory / name
+        if candidate.exists():
+            return str(candidate)
+        if directory.parent == directory:
+            return None
+        directory = directory.parent
+
+
+def stage_dir(opts: Opts, tool: str, *, default_workdir: str = ".colors",
+              default_profile: str = "default", state_file_key: str = "blue/state-file") -> str:
+    workdir = Path(str(opts.get("workdir") or default_workdir))
+    state_file = opts.get(state_file_key)
+    root = Path(str(state_file)).parent / workdir if not workdir.is_absolute() and isinstance(state_file, str) else workdir
+    return str(root / str(opts.get("profile") or default_profile) / tool)
+
+
+async def run_cli(workflow: Workflow, args: list[str], *, default_file: str = "blue.yml",
+                  search_parents: bool = False, allowed_events: list[str] | None = None) -> Opts:
     """Parse `args`, load the desired state, stamp "blue/event", run
     `workflow`. Returns the final opts dict ("blue/exit" 2 on
     usage/state-file errors)."""
     try:
         values, positionals = _parse_args(args)
+        if values["file"] == "blue.yml" and default_file != "blue.yml":
+            values["file"] = default_file
+        if search_parents and values["file"] == default_file:
+            values["file"] = find_up(default_file) or default_file
         event = positionals[0] if positionals else None
-        if not event:
+        if not event or (allowed_events is not None and event not in allowed_events):
             return {"blue/exit": 2, "blue/err": USAGE}
         if not os.path.exists(values["file"]):
             return {"blue/exit": 2, "blue/err": f"desired state file not found: {values['file']}"}
@@ -162,7 +187,7 @@ async def run_cli(workflow: Workflow, args: list[str]) -> Opts:
         return {"blue/exit": 2, "blue/err": str(t) or type(t).__name__}
 
 
-def exec_cli(workflow: Workflow, args: list[str] | None = None) -> None:
+def exec_cli(workflow: Workflow, args: list[str] | None = None, **config) -> None:
     """Run and exit the process with "blue/exit", printing "blue/err" and
     "blue/trace" to stderr. For use from the project's ./blue uv script."""
     argv = sys.argv[1:] if args is None else args
@@ -176,7 +201,7 @@ def exec_cli(workflow: Workflow, args: list[str] | None = None) -> None:
             os._exit(1)
 
         asyncio.get_running_loop().set_exception_handler(on_unhandled)
-        return await run_cli(workflow, argv)
+        return await run_cli(workflow, argv, **config)
 
     res = asyncio.run(main())
     if res.get("blue/err"):

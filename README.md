@@ -120,18 +120,18 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   delimiter overrides (`tag_open`/`tag_close`/`filter_open`/`filter_close`)
   for templates that must preserve Jinja2 `{{ }}` / `{% %}`.
 
-- `scaffold.py` — flat file-spec DSL. Specs are `{"template": {"name",
-  "content"}, "target", "data", "opts"?}` where template content is read by
-  the owning package (next to the module or via `importlib.resources`) —
-  there is no runtime template lookup. Create renders files;
-  `"blue/event": "delete"` removes the same rendered targets and prunes empty
-  parent directories.
+- `scaffold.py` — flat file-spec DSL. Template specs render content owned by
+  the package; `content_spec` writes computed content exactly. Delete removes
+  the same targets and prunes empty parent directories.
+  `PRESERVE_JINJA_DELIMITERS` is the shared alternate-delimiter preset.
 
 - `tofu.py` — event-aware OpenTofu steps. Non-`"delete"` runs `init` +
   `apply` and merges `tofu output -json` under `"tofu/outputs"` by default.
   `"delete"` runs `init` + `destroy`. Backends are `before` advice
   (`local_backend_advice`, `s3_backend_advice`, `gcs_backend_advice`,
-  `r2_backend_advice`, `backend_advice`). Commands accept per-run environments;
+  `r2_backend_advice`, `backend_advice`). `conventional_backend_advice`
+  supplies package local/S3/R2 policy with explicit directory and state-key
+  functions. Commands accept per-run environments;
   `tofu_with_spec` supports build, and deterministic HCL/JSON helpers match
   Green's bytes.
 
@@ -151,6 +151,14 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   booleans (`no` is a string; `zk/…` keys parse unquoted), overlays
   `COLORS_PAR_*`, stamps `"blue/event"`, and runs the workflow. Exit 2 is
   reserved for usage/config errors.
+
+- `lifecycle.py` — configurable package preflight with ordered validation and
+  success callbacks.
+
+- `providers.py` — operations over caller-owned provider registries.
+
+- `process.py` — inherited-terminal execution, POSIX quoting, and configurable
+  sequential command plans.
 
 - `gates.py` — pydantic schema gates for `before-while` (the port of red's
   Zod gates). Gates validate and return the original opts; they must never

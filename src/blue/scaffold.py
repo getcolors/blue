@@ -17,6 +17,14 @@ import os
 from .renderer import render
 from .workflow import Opts, StepError
 
+PRESERVE_JINJA_DELIMITERS = {
+    "tag_open": "<", "tag_close": ">", "filter_open": "{", "filter_close": "}"
+}
+
+
+def content_spec(target: str, content: str) -> dict:
+    return {"target": target, "content": content, "data": {}}
+
 
 def render_template(template: dict, data: dict, opts: dict | None = None) -> str:
     """Render a template's content with `data`. Optional `opts` are forwarded
@@ -42,7 +50,7 @@ def _prune_empty_dir(file: str) -> None:
 
 
 def _target_path(spec: dict) -> str:
-    return render(spec["target"], spec["data"])
+    return render(spec["target"], spec.get("data") or {})
 
 
 def _delete_target(target: str) -> None:
@@ -54,7 +62,8 @@ def _delete_target(target: str) -> None:
 def _create_target(spec: dict, target: str) -> None:
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, "w") as f:
-        f.write(render_template(spec["template"], spec["data"], spec.get("opts")))
+        f.write(str(spec["content"]) if "content" in spec else
+                render_template(spec["template"], spec.get("data") or {}, spec.get("opts")))
 
 
 def scaffold(opts: Opts, specs: list[dict]) -> Opts:

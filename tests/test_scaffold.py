@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from blue.scaffold import render_template, scaffold
+from blue.scaffold import content_spec, render_template, scaffold
 from blue.workflow import StepError
 
 RES = Path(__file__).parent / "resources"
@@ -90,6 +90,12 @@ def test_renderer_supports_if_and_not_empty_with_custom_delimiters():
     opts = {"tag_open": "<", "tag_close": ">", "filter_open": "{", "filter_close": "}"}
     assert render_template(template, {"value": "yes"}, opts) == "yes"
     assert render_template(template, {"value": ""}, opts) == "none"
+
+
+def test_direct_content_is_written_exactly(tmp_path):
+    target = tmp_path / "raw.txt"
+    scaffold({"blue/event": "create"}, [content_spec(str(target), "{{ untouched }}\n")])
+    assert target.read_text() == "{{ untouched }}\n"
 
 
 def test_a_template_without_content_throws_with_context():

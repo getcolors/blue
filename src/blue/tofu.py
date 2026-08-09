@@ -157,6 +157,24 @@ def r2_backend_advice(dir_fn: Callable[[Opts], str], config: BackendConfig):
     return s3_backend_advice(dir_fn, r2_config)
 
 
+def conventional_backend_advice(
+    *, dir: Callable[[Opts], str], key: Callable[[Opts], str],
+    choose: Callable[[Opts], str] | None = None, fields: dict | None = None,
+):
+    fields = fields or {}
+    s3 = {"bucket": "s3-bucket", "region": "s3-region", **fields.get("s3", {})}
+    r2 = {"bucket": "r2-bucket", "endpoint": "r2-endpoint", **fields.get("r2", {})}
+    return backends(choose or (lambda o: str(o.get("provider-backend") or "local")), {
+        "local": local_backend_advice(dir),
+        "s3": s3_backend_advice(dir, lambda o: {
+            "bucket": o.get(s3["bucket"]), "key": key(o), "region": o.get(s3["region"]),
+        }),
+        "r2": r2_backend_advice(dir, lambda o: {
+            "bucket": o.get(r2["bucket"]), "key": key(o), "endpoint": o.get(r2["endpoint"]),
+        }),
+    })
+
+
 def backends(choose: Callable[[Opts], str], advices: dict[str, Callable[[Opts], Opts]]):
     def advice(opts: Opts) -> Opts:
         name = choose(opts)
