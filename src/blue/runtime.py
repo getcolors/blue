@@ -44,11 +44,15 @@ async def _spawn_exec(
             timeout = f"command timed out after {timeout_ms}ms"
             captured = err.decode()
             return ExecResult(
-                exit=-1,
+                exit=124,
                 out=out.decode(),
                 err=f"{captured}\n{timeout}" if captured else timeout,
             )
-        return ExecResult(exit=proc.returncode or 0, out=out.decode(), err=err.decode())
+        # asyncio uses negative return codes for signals, while Blue steps
+        # reserve positive codes for failure. Preserve the shell convention
+        # so interrupted commands cannot look successful to workflow helpers.
+        code = proc.returncode or 0
+        return ExecResult(exit=128 - code if code < 0 else code, out=out.decode(), err=err.decode())
     except OSError as e:
         # command not found and similar spawn failures follow the same shape
         return ExecResult(exit=127, out="", err=str(e))

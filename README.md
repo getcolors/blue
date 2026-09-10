@@ -167,7 +167,9 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
 
 - `runtime.py` — mutable test seam for subprocesses and log lines. All
   command execution goes through `runtime.exec` with per-command environments
-  and timeouts; tests stub it instead of shelling out.
+  and timeouts; tests can stub it instead of shelling out. Results use zero for
+  success and positive codes for failure: signals become `128 + signal`,
+  timeouts return 124, and spawn failures return 127.
 
 ## The ./blue launcher
 
