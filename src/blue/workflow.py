@@ -277,7 +277,7 @@ def _deep_freeze(x: Any, _memo: dict | None = None) -> Any:
         fd = FrozenDict()
         memo[id(x)] = fd
         for k, v in x.items():
-            dict.__setitem__(fd, k, _deep_freeze(v, memo))
+            dict.__setitem__(fd, _deep_freeze(k, memo), _deep_freeze(v, memo))
         return fd
     if isinstance(x, list):
         if id(x) in memo:
@@ -287,7 +287,18 @@ def _deep_freeze(x: Any, _memo: dict | None = None) -> Any:
         for v in x:
             list.append(fl, _deep_freeze(v, memo))
         return fl
-    return x
+    if isinstance(x, (tuple, frozenset)):
+        if id(x) in memo:
+            return memo[id(x)]
+        values = [_deep_freeze(v, memo) for v in x]
+        # A tuple can participate in a cycle through a list or dict. That
+        # recursive visit may already have built its frozen counterpart.
+        if id(x) not in memo:
+            memo[id(x)] = tuple(values) if isinstance(x, tuple) else frozenset(values)
+        return memo[id(x)]
+    if x is None or type(x) in (str, bytes, bool, int, float, complex, range, Entry) or callable(x):
+        return x
+    raise TypeError("unsupported mutable step input; use dicts, lists, tuples and immutable scalars")
 
 
 # --- running one step ----------------------------------------------------------
@@ -444,18 +455,20 @@ def _branch_worst_exit(branch_opts: list[Opts]) -> int:
     return max(_exit_of(o) for o in branch_opts)
 
 
-def _first_failed_branch(branch_opts: list[Opts]) -> Opts | None:
-    return next((o for o in branch_opts if failed(o)), None)
-
-
 def _join_forks(entries: list[LiveEntry]) -> list[ForkFrame]:
-    return next((e.forks for e in entries if e.forks), [])
+    first = entries[0].forks if entries else []
+    length = 0
+    while length < len(first) and all(
+        len(e.forks) > length and e.forks[length].id == first[length].id for e in entries
+    ):
+        length += 1
+    return first[:length]
 
 
 def _failed_join_result(
     fork_opts: Opts, forks: list[ForkFrame], branch_opts: list[Opts], worst: int
 ) -> UnitResult:
-    bad = _first_failed_branch(branch_opts)
+    bad = next((o for o in branch_opts if _exit_of(o) == worst), None)
     return _terminal_result(
         {
             **fork_opts,
@@ -492,17 +505,16 @@ async def _run_join_unit(
 def _unit_base_opts(unit: Unit) -> Opts:
     if unit.entry is not None:
         return unit.entry.opts
-    if unit.entries:
-        return unit.entries[0].opts
-    return {}
+    entries = unit.entries or []
+    forks = _join_forks(entries)
+    base = forks[-1].opts if forks else entries[0].opts if entries else {}
+    return {**base, "blue/branches": [e.opts for e in entries]}
 
 
 def _unit_forks(unit: Unit) -> list[ForkFrame]:
     if unit.entry is not None:
         return unit.entry.forks
-    if unit.entries:
-        return unit.entries[0].forks
-    return []
+    return _join_forks(unit.entries or [])[:-1]
 
 
 async def _run_unit(wf: Workflow, run_opts: Opts, unit: Unit) -> UnitResult:

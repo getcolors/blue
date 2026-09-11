@@ -55,7 +55,7 @@ class _UsageError(Exception):
 
 
 def _parse_args(args: list[str]) -> tuple[dict, list[str]]:
-    values: dict = {"file": "blue.yml", "start": None, "end": None, "dry-run": False}
+    values: dict = {"file": None, "start": None, "end": None, "dry-run": False}
     positionals: list[str] = []
     names = {"-f": "file", "--file": "file", "--start": "start", "--end": "end"}
     i = 0
@@ -82,13 +82,13 @@ def _parse_args(args: list[str]) -> tuple[dict, list[str]]:
 # PyYAML parses YAML 1.1, where unquoted `no`/`yes`/`on`/`off` are booleans and
 # an integer may be octal by leading zero (`012` is 10) or sexagesimal by colon
 # (`1:30` is 90). blue documents YAML 1.2 core-schema semantics (matching red's
-# Bun.YAML), so both the bool and int resolvers are replaced: only true/false
-# variants are booleans, and an integer is decimal unless prefixed 0o or 0x.
+# Bun.YAML). Replace the scalar resolvers, including floats and timestamps:
+# dates and sexagesimal values stay strings, scientific notation is numeric.
 class _CoreLoader(yaml.SafeLoader):
     pass
 
 
-_REPLACED = ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:int")
+_REPLACED = tuple(f"tag:yaml.org,2002:{kind}" for kind in ("bool", "int", "float", "timestamp"))
 _CoreLoader.yaml_implicit_resolvers = {
     key: [(tag, regexp) for tag, regexp in resolvers if tag not in _REPLACED]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
@@ -102,6 +102,12 @@ _CoreLoader.add_implicit_resolver(
     "tag:yaml.org,2002:int",
     re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
     list("-+0123456789"),
+)
+
+_CoreLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(r"^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"),
+    list("-+0123456789."),
 )
 
 
@@ -155,10 +161,8 @@ async def run_cli(workflow: Workflow, args: list[str], *, default_file: str = "b
     usage/state-file errors)."""
     try:
         values, positionals = _parse_args(args)
-        if values["file"] == "blue.yml" and default_file != "blue.yml":
-            values["file"] = default_file
-        if search_parents and values["file"] == default_file:
-            values["file"] = find_up(default_file) or default_file
+        if values["file"] is None:
+            values["file"] = (find_up(default_file) if search_parents else None) or default_file
         event = positionals[0] if positionals else None
         if not event or (allowed_events is not None and event not in allowed_events):
             return {"blue/exit": 2, "blue/err": USAGE}

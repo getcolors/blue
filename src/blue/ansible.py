@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+import shlex
 from typing import Any, Callable
 
 from .runtime import ExecResult, runtime
@@ -111,8 +113,43 @@ async def ansible_with_spec(opts: Opts, specs: list[dict], **config: Any) -> Opt
 # --- inventory -----------------------------------------------------------------
 
 
-def _ini_vars(vars: dict | None) -> list[str]:
-    return [f"{k}={v}" for k, v in sorted((vars or {}).items())]
+def _python_literal(value: Any) -> str:
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if value is None:
+        return "None"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_python_literal(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(_python_literal(str(k)) + ":" + _python_literal(v)
+                              for k, v in sorted(value.items())) + "}"
+    raise ValueError("inventory variables require finite numbers or JSON-compatible values")
+
+
+def _group_value(value: Any) -> str:
+    # Both inventory forms evaluate Python literals. Keep ordinary names,
+    # paths, and IPv4 addresses byte-compatible; quote all other strings.
+    if isinstance(value, str) and (
+        re.fullmatch(r"[A-Za-z_/@][A-Za-z0-9_./:@%+-]*", value)
+        and value not in {"True", "False", "None"}
+        or re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", value)
+    ):
+        return value
+    return _python_literal(value)
+
+
+def _host_value(value: Any) -> str:
+    # Host lines also pass through shlex before Python literal evaluation.
+    return shlex.quote(_group_value(value))
+
+
+def _ini_vars(vars: dict | None, *, group: bool = False) -> list[str]:
+    encode = _group_value if group else _host_value
+    return [f"{k}={encode(v)}" for k, v in sorted((vars or {}).items())]
 
 
 def _host_line(host: dict) -> str:
@@ -122,7 +159,7 @@ def _host_line(host: dict) -> str:
 def _group_section(group: str, spec: dict) -> str:
     host_entries = sorted(spec["hosts"], key=lambda h: h["name"])
     lines = f"[{group}]\n" + "".join(f"{_host_line(h)}\n" for h in host_entries)
-    var_entries = _ini_vars(spec.get("vars"))
+    var_entries = _ini_vars(spec.get("vars"), group=True)
     if not var_entries:
         return lines
     return f"{lines}\n[{group}:vars]\n" + "".join(f"{v}\n" for v in var_entries)
@@ -147,7 +184,9 @@ def inventory_advice(file_fn: Callable[[Opts], str], groups: InventoryGroups):
 
     def advice(opts: Opts) -> Opts:
         file = file_fn(opts)
-        os.makedirs(os.path.dirname(file), exist_ok=True)
+        parent = os.path.dirname(file)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(file, "w") as f:
             f.write(inventory_ini(groups(opts) if callable(groups) else groups))
         return opts

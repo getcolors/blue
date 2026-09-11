@@ -321,3 +321,137 @@ async def test_parallel_branches_actually_run_concurrently():
     assert res["blue/exit"] == 0
     # branches overlapped in time
     assert peak > 1
+
+
+@pytest.mark.parametrize("right_length", [1, 4])
+@pytest.mark.parametrize("enclosing_fork", [False, True])
+async def test_nested_join_uses_common_ancestry(right_length, enclosing_fork):
+    graph = {
+        "t/root": ["t/fork", "t/outside"] if enclosing_fork else ["t/fork"],
+        "t/fork": ["t/left", "t/right1"], "t/left": ["t/leaf1", "t/leaf2"],
+        "t/leaf1": ["t/join"], "t/leaf2": ["t/join"],
+        "t/join": ["t/final"] if enclosing_fork else [],
+        "t/outside": ["t/final"], "t/final": [],
+    }
+    for i in range(1, right_length + 1):
+        graph[f"t/right{i}"] = ["t/join" if i == right_length else f"t/right{i + 1}"]
+    joins = []
+
+    def wire(s, _):
+        def execute(o):
+            if s in ("t/join", "t/final"):
+                joins.append({"step": s, "base": o["path"], "branches": o["blue/branches"]})
+            return {**o, "path": [*o.get("path", []), s]}
+        return [execute, *graph[s]]
+
+    result = await run(workflow(start="t/root", wire_fn=wire), {})
+    assert result["blue/exit"] == 0
+    assert joins[0]["base"] == ["t/root", "t/fork"]
+    assert len(joins[0]["branches"]) == 3
+    assert len(joins) == (2 if enclosing_fork else 1)
+    if enclosing_fork:
+        assert joins[1]["base"] == ["t/root"]
+        assert len(joins[1]["branches"]) == 2
+
+
+async def test_failure_after_nested_join_does_not_collapse_joined_fork():
+    graph = {
+        "t/root": ["t/left", "t/right"], "t/left": ["t/a", "t/b"],
+        "t/a": ["t/join"], "t/b": ["t/join"], "t/right": ["t/r2"],
+        "t/r2": ["t/r3"], "t/r3": ["t/join"], "t/join": ["t/fail"], "t/fail": [],
+    }
+
+    def wire(s, _):
+        def execute(o):
+            return ({**o, "blue/exit": 8, "blue/err": "after join"} if s == "t/fail"
+                    else {**o, "joined": s == "t/join" or o.get("joined", False)})
+        return [execute, *graph[s]]
+
+    result = await run(workflow(start="t/root", wire_fn=wire), {})
+    assert result["blue/exit"] == 8
+    assert result["joined"] is True
+    assert len(result["blue/branches"]) == 3
+
+
+@pytest.mark.parametrize("exits", [(3, 9), (9, 3), (9, 9)])
+async def test_failed_join_preserves_worst_diagnostics(exits):
+    def wire(s, _):
+        if s == "t/root":
+            return [lambda o: o, "t/a", "t/b"]
+        if s == "t/join":
+            def unexpected(_):
+                raise AssertionError("join must not execute")
+            return [unexpected]
+        n = 0 if s == "t/a" else 1
+        return [lambda o: {**o, "blue/exit": exits[n], "blue/err": f"error {n}",
+                           "blue/trace": f"trace {n}"}, "t/join"]
+
+    result = await run(workflow(start="t/root", wire_fn=wire,
+                               next_fn=lambda _s, ns, o: [(n, o) for n in ns or []]), {})
+    winner = 0 if exits[0] >= exits[1] else 1
+    assert result["blue/exit"] == max(exits)
+    assert result["blue/err"] == f"error {winner}"
+    assert result["blue/trace"] == f"trace {winner}"
+    assert len(result["blue/branches"]) == 2
+
+
+async def test_tuple_members_are_frozen_before_step_mutation():
+    original = {"project": ({"value": "before"},)}
+
+    def mutate(o):
+        o["project"][0]["value"] = "after"
+        raise RuntimeError("later failure")
+
+    result = await run(workflow(start="t/change", wire_fn=lambda *_: [mutate]), original)
+    assert result["blue/exit"] == 1
+    assert original["project"][0]["value"] == "before"
+    assert result["project"][0]["value"] == "before"
+
+
+@pytest.mark.parametrize("value", [{"before"}, bytearray(b"before"), object()])
+async def test_unsupported_mutable_input_fails_before_step_runs(value):
+    called = False
+
+    def execute(o):
+        nonlocal called
+        called = True
+        return o
+
+    result = await run(workflow(start="t/change", wire_fn=lambda *_: [execute]), {"project": value})
+    assert not called
+    assert result["blue/exit"] == 1
+    assert "unsupported mutable step input" in result["blue/err"]
+
+
+async def test_freezing_preserves_tuple_cycles_and_callable_values():
+    data = []
+    cycle = (data,)
+    data.append(cycle)
+    result = await run(workflow(start="t/read", wire_fn=lambda *_: [
+        lambda o: {**o, "cycle_preserved": o["data"][0][0] is o["data"], "value": o["compute"](1)}
+    ]), {"data": cycle, "compute": lambda n: n + 1})
+    assert result["blue/exit"] == 0
+    assert result["cycle_preserved"]
+    assert result["value"] == 2
+
+
+async def test_join_routing_exceptions_preserve_common_fork_context():
+    graph = {
+        "t/root": ["t/left", "t/right"], "t/left": ["t/a", "t/b"],
+        "t/a": ["t/join"], "t/b": ["t/join"], "t/right": ["t/r2"],
+        "t/r2": ["t/r3"], "t/r3": ["t/join"], "t/join": [],
+    }
+
+    def wire(s, _):
+        return [lambda o: {**o, "path": [*o.get("path", []), s]}, *graph[s]]
+
+    def route(s, ns, o):
+        if s == "t/join":
+            raise RuntimeError("routing failed")
+        return [(n, o) for n in ns or []]
+
+    result = await run(workflow(start="t/root", wire_fn=wire, next_fn=route), {})
+    assert result["blue/exit"] == 1
+    assert result["blue/err"] == "routing failed"
+    assert result["path"] == ["t/root"]
+    assert len(result["blue/branches"]) == 3

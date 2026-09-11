@@ -98,10 +98,15 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   Independent successors run in parallel asyncio tasks. Branches that
   converge join once with results under `"blue/branches"`; failed forks
   collapse and propagate the worst exit. The step boundary deep-freezes input
-  (`FrozenDict`/`FrozenList` raise on mutation), catches raised exceptions,
+  (`FrozenDict`/`FrozenList` raise on mutation), recursively freezes tuple and
+  frozenset members, catches raised exceptions,
   rejects non-dict returns, stamps `"blue/step"`, and removes private
   inherited-advice state from results. `step(wf, in_fn=..., out_fn=...)` embeds
-  workflows as ordinary steps.
+  workflows as ordinary steps. Unsupported mutable values and custom instances
+  fail before the step runs. Callables remain usable; their captured state is
+  outside the input freezing contract. Joins use the deepest shared fork and
+  preserve enclosing forks. Failed joins select the highest exit code and its
+  branch diagnostics, choosing the first incoming branch when codes tie.
 
 - `advice.py` — Emacs `nadvice`-style combinators: `around`, `before`,
   `after`, `override`, `before-while`, `before-until`, `after-while`,
@@ -148,9 +153,11 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
 
 - `cli.py` — `run_cli` / `exec_cli`: parses `./blue <event> [-f blue.yml]
   [--start step] [--end step] [--dry-run]`, loads YAML with 1.2 core-schema
-  booleans (`no` is a string; `zk/…` keys parse unquoted), overlays
+  scalars (`no`, dates and sexagesimal values stay strings; scientific notation,
+  octal and hexadecimal values are numeric), overlays
   `COLORS_PAR_*`, stamps `"blue/event"`, and runs the workflow. Exit 2 is
-  reserved for usage/config errors.
+  reserved for usage/config errors. Explicit file options override configured
+  defaults; parent-directory search applies only when the file option is omitted.
 
 - `lifecycle.py` — configurable package preflight with ordered validation and
   success callbacks.

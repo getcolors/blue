@@ -229,3 +229,50 @@ async def test_extra_vars_user_key_and_host_key_checking_shape_the_command(tmp_p
         "create.yml",
     ]
     assert seen_env["env"] == {"ANSIBLE_HOST_KEY_CHECKING": "False"}
+
+
+def test_inventory_quotes_host_and_group_values_separately():
+    rendered = inventory_ini({'web': {
+        'hosts': [{'name': 'localhost', 'vars': {'path': '/tmp/my keys/id', 'count': 3,
+                                               'text': '123', 'enabled': True}}],
+        'vars': {'path': '/tmp/my keys/id', 'text': '123', 'enabled': True},
+    }})
+    assert rendered == (
+        '[web]\nlocalhost count=3 enabled=True path=\'"/tmp/my keys/id"\' text=\'"123"\'\n'
+        '\n[web:vars]\nenabled=True\npath="/tmp/my keys/id"\ntext="123"\n'
+    )
+
+
+def test_inventory_advice_accepts_a_bare_filename(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    opts = {'app/name': 'test'}
+    assert inventory_advice(lambda _: 'inventory.ini', {'web': {'hosts': [{'name': 'localhost'}]}})(opts) is opts
+    assert Path('inventory.ini').read_text() == '[web]\nlocalhost\n'
+
+
+def test_inventory_round_trips_through_ansible(tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    binary = shutil.which('ansible-inventory')
+    if not binary:
+        pytest.skip('ansible-inventory is not on PATH')
+    values = {
+        'path': '/tmp/my keys/id_ed25519', 'quote': 'he said "it\'s ready"',
+        'backslash': 'C:\\keys\\new', 'comment': '#hash; value', 'empty': '',
+        'numeric_string': '123', 'boolean_string': 'False', 'null_string': 'None',
+        'boolean': True, 'number': 3, 'null': None, 'unicode': 'café',
+        'whitespace': ' surrounding whitespace ', 'newline': 'first\nsecond',
+        'nested': {'a': [1, False, 'x y']},
+    }
+    expected = {f'{prefix}_{k}': v for prefix in ['host', 'group'] for k, v in values.items()}
+    target = tmp_path / 'inventory.ini'
+    target.write_text(inventory_ini({'web': {
+        'hosts': [{'name': 'localhost', 'vars': {f'host_{k}': v for k, v in values.items()}}],
+        'vars': {f'group_{k}': v for k, v in values.items()},
+    }}))
+    parsed = subprocess.run([binary, '-i', str(target), '--list'], capture_output=True, text=True, check=True)
+    assert 'Failed to parse' not in parsed.stderr
+    actual = json.loads(parsed.stdout)['_meta']['hostvars']['localhost']
+    assert actual == expected

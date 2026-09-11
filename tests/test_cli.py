@@ -117,3 +117,59 @@ async def test_namespaced_keys_and_yaml_1_2_semantics_survive_the_load(tmp_path)
     )
     # zk/workdir parses unquoted; `no` is the string "no", not False
     assert res["probe"] == ["work", "no"]
+
+
+async def test_explicit_file_overrides_configured_default(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "blue.yml").write_text("x: 1")
+    (tmp_path / "colors.yml").write_text("x: 2")
+    for option in (["-f", "blue.yml"], ["--file", "blue.yml"], ["--file=blue.yml"]):
+        result = await run_cli(probe_wf(), ["create", *option], default_file="colors.yml")
+        assert result["seen"][0] == ("a", "create", 1)
+        assert result["blue/state-file"] == str(tmp_path / "blue.yml")
+    result = await run_cli(probe_wf(), ["create"], default_file="colors.yml")
+    assert result["seen"][0] == ("a", "create", 2)
+
+
+async def test_parent_search_only_applies_to_omitted_file(tmp_path, monkeypatch):
+    (tmp_path / "blue.yml").write_text("x: 1")
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    result = await run_cli(probe_wf(), ["create"], search_parents=True)
+    assert result["blue/state-file"] == str(tmp_path / "blue.yml")
+    for option in (["-f", "blue.yml"], ["--file", "blue.yml"], ["--file=blue.yml"]):
+        result = await run_cli(probe_wf(), ["create", *option], search_parents=True)
+        assert result["blue/exit"] == 2
+        assert "not found" in result["blue/err"]
+
+
+def test_core_scalar_numbers_and_strings():
+    import math
+    import yaml
+
+    loaded = load_yaml('''exponent: 1e3
+fractional-exponent: 1.0e3
+small-exponent: 1.25e-2
+date: 2026-09-11
+clock: 1:30.5
+octal: 0o17
+hex: 0x1f
+quoted: ["1e3", "0o17", "0x1f", "2026-09-11"]
+nested: {number: &n 0o17, alias: *n}
+positive-infinity: .inf
+negative-infinity: -.Inf
+nan: .NaN
+''')
+    assert loaded["exponent"] == loaded["fractional-exponent"] == 1000
+    assert loaded["small-exponent"] == 0.0125
+    assert loaded["date"] == "2026-09-11"
+    assert loaded["clock"] == "1:30.5"
+    assert loaded["octal"] == 15 and loaded["hex"] == 31
+    assert loaded["quoted"] == ["1e3", "0o17", "0x1f", "2026-09-11"]
+    assert loaded["nested"] == {"number": 15, "alias": 15}
+    assert loaded["positive-infinity"] == math.inf
+    assert loaded["negative-infinity"] == -math.inf
+    assert math.isnan(loaded["nan"])
+    # The SDK's loader must not change PyYAML's process-global safe loader.
+    assert yaml.safe_load("value: 1:30.5")["value"] == 90.5

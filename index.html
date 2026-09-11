@@ -104,7 +104,7 @@
 <tr><td><code>"blue/branches"</code></td><td>List of per-branch result dicts at a join or collapsed failed fork. Sort by your own key if order matters.</td></tr>
 <tr><td><code>"blue.workflow/inherited"</code></td><td>Private advice-inheritance payload. It is stripped from public step and workflow results.</td></tr>
 </table>
-<div class="note"><strong>Step input is frozen.</strong> The engine deep-freezes opts at each step boundary using <code>FrozenDict</code> and <code>FrozenList</code>. Steps should return new dicts with <code>{**opts, ...}</code> instead of mutating input. If a step raises, the failure opts are built from the frozen input so partial mutation cannot leak.</div>
+<div class="note"><strong>Step input is frozen.</strong> The engine deep-freezes opts at each step boundary using <code>FrozenDict</code> and <code>FrozenList</code>, and recursively freezes tuple and frozenset members. Unsupported mutable values and custom instances fail before the step runs. Callables remain usable; their captured state is outside this guarantee. Steps should return new dicts with <code>{**opts, ...}</code> instead of mutating input. If a step raises, the failure opts are built from the frozen input so partial mutation cannot leak.</div>
 
 <h2 id="steps">3. Steps and errors</h2>
 <p>A step is a plain sync or async function <code>(opts) -&gt; opts</code>, named by a namespaced string such as <code>"zk/node"</code>. The name anchors wiring, logging, CLI slices, joins, and advice.</p>
@@ -185,7 +185,7 @@ step(sub_workflow,
 <ul>
   <li><strong>Static fork:</strong> <code>wire_fn</code> lists several successors.</li>
   <li><strong>Dynamic fan-out:</strong> <code>next_fn</code> returns several <code>(step, opts)</code> pairs.</li>
-  <li><strong>Join:</strong> branches from different origins that converge on the same step run that step once, using the fork-point opts plus <code>"blue/branches"</code>.</li>
+  <li><strong>Join:</strong> branches from different origins that converge on the same step run that step once, using the deepest shared fork's opts plus <code>"blue/branches"</code>.</li>
   <li><strong>Same-origin fan-out:</strong> same-step entries from one fan-out parent run independently instead of joining, which is how dynamic N-way item processing works.</li>
   <li><strong>Failure:</strong> a failed branch inside a fork lets siblings finish their current step, collapses the fork, skips the join, and propagates the worst exit with all branch results under <code>"blue/branches"</code>.</li>
 </ul>
@@ -223,6 +223,10 @@ def parent_wire_fn(step_name: str, _run_opts: Opts):
     }.get(step_name)</code></pre>
 <div class="note"><strong>When you don't need <code>step</code>.</strong> If the number of branches is fixed and known at design time, distinct step names work: <code>"deploy/staging"</code> and <code>"deploy/production"</code> never converge, so they run independently without a sub-workflow.</div>
 
+<p>A join consumes the deepest fork shared by all incoming branches and preserves its enclosing forks. Failed joins use the highest exit code and that branch's error and trace. Equal codes select the first incoming branch.</p>
+
+<p>YAML plain scientific notation, octal and hexadecimal values are numeric. Date-like and sexagesimal values remain strings. Quoted scalars remain strings. Unknown CLI options return exit 2 before workflow execution.</p>
+
 <h2 id="advice">6. Advice</h2>
 <p>Advice wraps step functions without changing graph wiring. Registries are immutable workflow data; adding/removing advice returns a new workflow.</p>
 <pre><code>from blue.workflow import advice_add, advice_add_all, advice_remove, advice_remove_all
@@ -249,7 +253,8 @@ quiet = advice_remove_all(without_backend, "app/progress")</code></pre>
 <p><strong>Advice inheritance through <code>step</code>.</strong> The enclosing run stamps its effective advice into opts under a private key, and the nested run merges that advice over the child's own registries. Ancestor entries are outermost at equal depth; same-id ancestor entries replace child entries. Use <code>advice_plan(wf, step)</code> or <code>advice_plan([parent, child], step)</code> to inspect the composed stack.</p>
 
 <h2 id="config">7. blue.yml and validation gates</h2>
-<p>The CLI reads <code>blue.yml</code> by default (override with <code>-f/--file</code>), parses it with PyYAML plus YAML 1.2 core-schema boolean behavior, stamps the lifecycle event, and passes the resulting dict to <code>run</code>.</p>
+<p>Explicit <code>-f/--file</code> paths always take precedence over configured defaults. Parent-directory search only applies when the file option is omitted.</p>
+<p>The CLI reads <code>blue.yml</code> by default (override with <code>-f/--file</code>), parses it with PyYAML plus YAML 1.2 core-schema scalar behavior, stamps the lifecycle event, and passes the resulting dict to <code>run</code>.</p>
 <pre><code>zk/workdir: work
 zk/servers:
   - {id: 1, name: zk1, ip: 10.0.0.1}
@@ -338,7 +343,7 @@ async def provision(opts: Opts) -&gt; Opts:
   <li>Any non-<code>"delete"</code> event runs the create playbook (<code>create.yml</code> by default); <code>"delete"</code> runs the delete playbook (<code>delete.yml</code> by default). Override with <code>playbooks</code>.</li>
   <li>Options map to <code>ansible-playbook</code>: <code>inventory</code>, <code>private_key</code>, <code>user</code>, <code>extra_vars</code> (JSON <code>-e</code>), and <code>host_key_checking=False</code> (exports <code>ANSIBLE_HOST_KEY_CHECKING=False</code>).</li>
   <li>On success, PLAY RECAP is parsed into per-host counters under <code>"ansible/recap"</code> by default; override with namespaced <code>recap_key</code>.</li>
-  <li><code>inventory_ini</code> renders deterministic INI from <code>{group: {"hosts": [{"name", "vars"}], "vars": {...}}}</code>.</li>
+  <li><code>inventory_ini</code> renders deterministic INI from <code>{group: {"hosts": [{"name", "vars"}], "vars": {...}}}</code>. Strings preserve whitespace, quotes, backslashes and literal-looking values such as <code>"123"</code>. Host values include shell quoting around their Python literal; group values use the literal directly.</li>
   <li><code>inventory_advice</code> is a <code>before</code> advice that writes an inventory file from data or a function of opts, mirroring OpenTofu backend advice.</li>
   <li><code>ansible_with_spec</code> scaffolds then runs on create, and runs then removes scaffolded files on delete.</li>
 </ul>
@@ -509,7 +514,7 @@ cd ../floci-zookeeper
 <tr><td><code>progress.advise</code></td><td><code>(workflow) -&gt; Workflow</code>.</td></tr>
 <tr><td><code>schema_gate</code></td><td><code>(pydantic_schema, exit=2) -&gt; before_while_advice</code>; validate without transforming opts.</td></tr>
 <tr><td><code>USAGE</code></td><td>CLI usage string.</td></tr>
-<tr><td><code>load_yaml</code></td><td><code>(text) -&gt; Opts</code>; YAML 1.2 core-schema boolean loader.</td></tr>
+<tr><td><code>load_yaml</code></td><td><code>(text) -&gt; Opts</code>; YAML 1.2 core-schema scalar loader.</td></tr>
 <tr><td><code>run_cli</code></td><td><code>await run_cli(workflow, args) -&gt; Opts</code>; non-exiting CLI runner.</td></tr>
 <tr><td><code>exec_cli</code></td><td><code>exec_cli(workflow, args=None) -&gt; None</code>; print errors and exit process.</td></tr>
 <tr><td><code>ExecResult</code></td><td>Dataclass result from subprocess execution: <code>{exit, out, err}</code>.</td></tr>

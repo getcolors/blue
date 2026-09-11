@@ -45,7 +45,7 @@ alone passes every test in this repository and breaks parity there.
 
 ### The YAML resolver replacement is load-bearing
 
-`src/blue/cli.py` replaces PyYAML's implicit **bool** and **int** resolvers and
+`src/blue/cli.py` replaces PyYAML's implicit **bool**, **int**, **float** and **timestamp** resolvers and
 the int constructor, because PyYAML defaults to YAML 1.1 while green (yamlstar)
 and red (`Bun.YAML`) follow the 1.2 core schema. The three disagree without it
 about whether `no` is a string, whether `012` is octal, and whether `1:30` is a
