@@ -60,7 +60,9 @@ def _delete_target(target: str) -> None:
 
 
 def _create_target(spec: dict, target: str) -> None:
-    os.makedirs(os.path.dirname(target), exist_ok=True)
+    parent = os.path.dirname(target)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(target, "w") as f:
         f.write(str(spec["content"]) if "content" in spec else
                 render_template(spec["template"], spec.get("data") or {}, spec.get("opts")))

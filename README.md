@@ -169,7 +169,10 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   command execution goes through `runtime.exec` with per-command environments
   and timeouts; tests can stub it instead of shelling out. Results use zero for
   success and positive codes for failure: signals become `128 + signal`,
-  timeouts return 124, and spawn failures return 127.
+  timeouts return 124, and spawn failures return 127. On POSIX, timeout and
+  cancellation kill the command's process group. Cleanup waits at most one
+  second for output pipes; descendants that start their own session can escape
+  the group. Environment overrides set to `None` remove inherited variables.
 
 ## The ./blue launcher
 

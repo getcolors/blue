@@ -110,3 +110,20 @@ def test_a_template_without_content_throws_with_context():
                 }
             ],
         )
+
+
+@pytest.mark.parametrize("template", [False, True])
+def test_bare_filename_create_and_delete(tmp_path, monkeypatch, template):
+    monkeypatch.chdir(tmp_path)
+    spec = (
+        {"target": "example.txt", "template": {"content": "Hello {{name}}\n"},
+         "data": {"name": "blue"}}
+        if template else content_spec("example.txt", "Hello blue\n")
+    )
+    created = scaffold({"blue/event": "create"}, [spec])
+    assert created["blue.scaffold/written"] == ["example.txt"]
+    assert Path("example.txt").read_text() == "Hello blue\n"
+    deleted = scaffold({"blue/event": "delete"}, [spec])
+    assert deleted["blue.scaffold/deleted"] == ["example.txt"]
+    assert not Path("example.txt").exists()
+    assert tmp_path.is_dir()

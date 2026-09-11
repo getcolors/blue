@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 from dataclasses import dataclass
 
 
@@ -14,6 +15,49 @@ class ExecResult:
     exit: int
     out: str
     err: str
+
+
+async def _capture(stream: asyncio.StreamReader, chunks: bytearray) -> None:
+    while chunk := await stream.read(65536):
+        chunks.extend(chunk)
+
+
+async def _stop_process(proc: asyncio.subprocess.Process, completion: asyncio.Future) -> None:
+    try:
+        if os.name == "posix":
+            # The group can outlive its leader and keep its output pipes open.
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            # Windows has no killpg. taskkill terminates the process tree while
+            # the command is alive; keep a direct kill as a fallback.
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                try:
+                    await asyncio.wait_for(killer.wait(), 1)
+                except TimeoutError:
+                    try:
+                        killer.kill()
+                    except ProcessLookupError:
+                        pass
+            except OSError:
+                pass
+            if proc.returncode is None:
+                proc.kill()
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(asyncio.shield(completion), 1)
+    except TimeoutError:
+        # A descendant may have detached from the group with inherited pipes.
+        # asyncio has no public Process.close; close its transport to release
+        # those pipes without waiting for the detached process to exit.
+        proc._transport.close()
+        completion.cancel()
+        await asyncio.gather(completion, return_exceptions=True)
 
 
 async def _spawn_exec(
@@ -25,7 +69,7 @@ async def _spawn_exec(
     try:
         full_env = None
         if env is not None:
-            full_env = {**os.environ, **{k: v for k, v in env.items() if v is not None}}
+            full_env = {k: v for k, v in {**os.environ, **env}.items() if v is not None}
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
@@ -33,21 +77,29 @@ async def _spawn_exec(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,
+            start_new_session=os.name == "posix",
+        )
+        out, err = bytearray(), bytearray()
+        completion = asyncio.gather(
+            proc.wait(), _capture(proc.stdout, out), _capture(proc.stderr, err)
         )
         try:
-            out, err = await asyncio.wait_for(
-                proc.communicate(), None if timeout_ms is None else timeout_ms / 1000
+            await asyncio.wait_for(
+                asyncio.shield(completion),
+                None if timeout_ms is None else timeout_ms / 1000,
             )
         except TimeoutError:
-            proc.kill()
-            out, err = await proc.communicate()
+            await asyncio.shield(_stop_process(proc, completion))
             timeout = f"command timed out after {timeout_ms}ms"
-            captured = err.decode()
+            captured = err.decode(errors="replace")
             return ExecResult(
                 exit=124,
-                out=out.decode(),
+                out=out.decode(errors="replace"),
                 err=f"{captured}\n{timeout}" if captured else timeout,
             )
+        except asyncio.CancelledError:
+            await asyncio.shield(_stop_process(proc, completion))
+            raise
         # asyncio uses negative return codes for signals, while Blue steps
         # reserve positive codes for failure. Preserve the shell convention
         # so interrupted commands cannot look successful to workflow helpers.
