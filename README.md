@@ -172,13 +172,14 @@ Modules under `src/blue/`, mirroring red's `src/*.ts`:
   replace opts with parsed output, which would strip unrelated namespace
   keys. Functional-syntax `TypedDict`s carry namespaced string keys.
 
-- `runtime.py` — mutable test seam for subprocesses and log lines. All
-  command execution goes through `runtime.exec` with per-command environments
-  and timeouts; tests can stub it instead of shelling out. Results use zero for
+- `runtime.py` is the mutable test seam for subprocesses and log lines.
+  Captured commands use asynchronous `runtime.exec` with per-command environments
+  and timeouts. `run_inherit` uses synchronous `runtime.exec_inherit` and inherits
+  terminal input and output. Tests can stub either method. Results use zero for
   success and positive codes for failure: signals become `128 + signal`,
   timeouts return 124, and spawn failures return 127. On POSIX, timeout and
-  cancellation kill the command's process group. Cleanup waits at most one
-  second for output pipes; descendants that start their own session can escape
+  cancellation of captured commands kill the command's process group. Cleanup
+  waits at most one second for output pipes; descendants that start their own session can escape
   the group. Environment overrides set to `None` remove inherited variables.
 
 ## The ./blue launcher

@@ -1,16 +1,11 @@
 from __future__ import annotations
 import inspect
-import os
-import subprocess
 from .runtime import ExecResult, runtime
 
 
 def posix_quote(value) -> str: return "'" + str(value).replace("'", "'\\''") + "'"
 def run_inherit(args: list[str], *, cwd: str | None = None, env: dict | None = None) -> ExecResult:
-    try:
-        result = subprocess.run(args, cwd=cwd, env={**os.environ, **env} if env else None, check=False)
-        return ExecResult(result.returncode, "", "")
-    except OSError as error: return ExecResult(-1, "", str(error))
+    return runtime.exec_inherit(args, cwd=cwd, env=env)
 
 
 async def run_plan(commands: list[dict], *, runner=None, continue_on_error=None, cleanup=None):

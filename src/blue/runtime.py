@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import subprocess
 from dataclasses import dataclass
 
 
@@ -15,6 +16,22 @@ class ExecResult:
     exit: int
     out: str
     err: str
+
+
+def _spawn_inherit(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str | None] | None = None,
+) -> ExecResult:
+    try:
+        full_env = None
+        if env is not None:
+            full_env = {k: v for k, v in {**os.environ, **env}.items() if v is not None}
+        proc = subprocess.run(cmd, cwd=cwd, env=full_env, check=False)
+        code = proc.returncode
+        return ExecResult(exit=128 - code if code < 0 else code, out="", err="")
+    except OSError as error:
+        return ExecResult(exit=127, out="", err=str(error))
 
 
 async def _capture(stream: asyncio.StreamReader, chunks: bytearray) -> None:
@@ -117,6 +134,7 @@ def _print_log(*args: object) -> None:
 class Runtime:
     def __init__(self) -> None:
         self.exec = _spawn_exec
+        self.exec_inherit = _spawn_inherit
         self.log = _print_log
 
 
