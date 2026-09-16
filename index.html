@@ -521,6 +521,11 @@ cd ../floci-zookeeper
 <tr><td><code>runtime</code></td><td>Mutable <code>{exec, log}</code> seam used by subprocess and logging helpers.</td></tr>
 </table>
 
+<h2 id="kubernetes">Kubernetes controllers</h2>
+<p><code>blue.kubernetes</code> reconciles package workflows with bounded polling workers,
+state-identity locks, optimistic status writes, and deletion finalizers.
+The kubectl transport uses an explicit context or in-cluster authentication.
+Read the <a href="docs/kubernetes.md">controller contract</a>.</p>
 </main>
 </body>
 </html>

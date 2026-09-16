@@ -212,3 +212,9 @@ repository's [`index.html`](index.html) specification:
   outputs into top-level opts by default.
 - YAML caveat to document in every project: version-like values (`3.10`)
   must be quoted or YAML reads them as numbers.
+
+## Kubernetes controllers
+
+`blue.kubernetes` and `blue.kubernetes_client` provide bounded polling workers, state-identity locks,
+optimistic status writes, finalization, and explicit-context kubectl transport.
+See the [controller contract](docs/kubernetes.md) for callbacks and lifecycle rules.

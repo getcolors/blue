@@ -1,6 +1,6 @@
 # blue — the uv/Python implementation of the green/red workflow model.
 
-from . import advice, ansible, dry_run, lifecycle, process, progress, providers, tofu
+from . import advice, ansible, dry_run, kubernetes, lifecycle, process, progress, providers, tofu
 from .cli import USAGE, exec_cli, find_up, run_cli, stage_dir
 from .gates import schema_gate
 from .renderer import render
@@ -28,6 +28,7 @@ __all__ = [
     "progress",
     "tofu",
     "lifecycle",
+    "kubernetes",
     "providers",
     "process",
     "USAGE",
