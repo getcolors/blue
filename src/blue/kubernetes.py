@@ -150,10 +150,12 @@ def _due(c, r):
 def _options(r):
     spec, meta = r.get("spec", {}), r["metadata"]
     config = spec.get("config", {})
+    profile = config.get("profile")
+    if profile is None or profile is False:
+        profile = f"{meta.get('namespace')}--{meta.get('name')}"
     return {
         **config,
-        "profile": config.get("profile")
-        or f"{meta.get('namespace')}--{meta.get('name')}",
+        "profile": profile,
         "blue/event": "delete"
         if meta.get("deletionTimestamp")
         else "stop"
@@ -321,7 +323,8 @@ async def reconcile(c, package, namespace, name):
     r = await _call(get, package["resource"], namespace, name)
     if not r or not _due(c, r):
         return
-    key = _key(await _call(package["identity"], _options(r)))
+    identity = await _call(package["identity"], _options(r))
+    key = _key(identity)
     with _lock:
         if key in _held:
             return "busy"
@@ -340,9 +343,7 @@ async def reconcile(c, package, namespace, name):
                 latest,
                 _options(latest),
                 hashlib.sha256(
-                    _identity_text(
-                        await _call(package["identity"], _options(latest))
-                    ).encode()
+                    _identity_text(identity).encode()
                 ).hexdigest(),
             )
     finally:

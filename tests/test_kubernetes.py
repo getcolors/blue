@@ -87,6 +87,29 @@ class Fixture:
         return await k.reconcile(self.cfg, self.p, "dev", "demo")
 
 
+async def test_status_records_the_identity_used_to_acquire_the_lock():
+    f = Fixture()
+    identities = iter([
+        dict(backend="s3", profile="demo"),
+        dict(profile="demo", backend="s3"),
+    ])
+    f.p["identity"] = lambda _: next(identities)
+    await f.run()
+    assert f.r["status"]["phase"] == "Ready"
+    assert f.r["status"]["stateIdentity"] == (
+        "b31cd38f9fcf4d1acda385fd2fbef1167dc22a1d8945ac71aa45a974aae6b144"
+    )
+
+
+async def test_explicit_empty_profile_reaches_package_validation():
+    f = Fixture()
+    f.r["spec"]["config"]["profile"] = ""
+    f.p["validate"] = lambda o: ["profile is empty"] if o["profile"] == "" else []
+    await f.run()
+    assert f.r["status"]["phase"] == "Invalid"
+    assert f.effects == []
+
+
 async def test_convergence_drift_state_suspend_request():
     f = Fixture()
     await f.run()
