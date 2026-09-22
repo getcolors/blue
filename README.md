@@ -218,3 +218,8 @@ repository's [`index.html`](index.html) specification:
 `blue.kubernetes` and `blue.kubernetes_client` provide bounded polling workers, state-identity locks,
 optimistic status writes, finalization, and explicit-context kubectl transport.
 See the [controller contract](docs/kubernetes.md) for callbacks and lifecycle rules.
+
+## Runtime resource scopes
+
+`blue.scope.with_scope` owns ordered process/resource finalizers around a workflow.
+See [resource scopes](docs/resource-scopes.md).

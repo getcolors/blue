@@ -78,12 +78,18 @@ async def ansible_step(
     host_key_checking: bool | None = None,
     # namespaced key for the parsed recap
     recap_key: str = "ansible/recap",
+    env: dict[str, str | None] | None = None,
+    secret_env: list[str] | None = None,
 ) -> Opts:
     """Run `ansible-playbook` in `dir` according to "blue/event" (see
     `playbook`). On success the parsed PLAY RECAP is merged under `recap_key`
     (default "ansible/recap") — never top-level."""
     pb = playbook(opts, playbooks)
-    env = {"ANSIBLE_HOST_KEY_CHECKING": "False"} if host_key_checking is False else None
+    env = dict(env or {})
+    for name in [*(k for k in {*os.environ, *env} if k.startswith("COLORS_PAR_")), *(secret_env or [])]:
+        env[name] = None
+    if host_key_checking is False:
+        env["ANSIBLE_HOST_KEY_CHECKING"] = "False"
     args = ["-i", inventory]
     if private_key:
         args += ["--private-key", str(private_key)]

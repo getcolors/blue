@@ -628,7 +628,19 @@ async def _scheduler_step(
     ready_set = set(ready)
     waiting = [s for s in by_step if s not in ready_set]
     units = [u for s in ready for u in _step_units(s, by_step[s])]
-    results = await asyncio.gather(*(_run_unit(wf, run_opts, u) for u in units))
+    tasks = [asyncio.create_task(_run_unit(wf, run_opts, u)) for u in units]
+    try:
+        results = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        drain = asyncio.gather(*tasks, return_exceptions=True)
+        while not drain.done():
+            try:
+                await asyncio.shield(drain)
+            except asyncio.CancelledError:
+                pass
+        raise
     return _collapse_doomed(
         [*(e for s in waiting for e in by_step[s]), *(e for r in results for e in r.new_entries)],
         [*finished, *(t for r in results for t in r.terminals)],
