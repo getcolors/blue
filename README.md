@@ -2,8 +2,8 @@
 
 `blue` is the uv/Python implementation of the green workflow model: a library
 for building idempotent devops CLIs — desired state in YAML, workflows as step
-graphs threaded by a plain dict, template-scaffolded config files, OpenTofu
-and Ansible as the muscle.
+graphs threaded by a plain dict, template-scaffolded config files, and optional
+event-aware OpenTofu and Ansible steps — a package can use them, but does not need them.
 
 The port is **behavioral**: green is the canonical model, and this package
 locks its Python behavior into pytest while preserving red-compatible APIs.

@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `blue` is the uv/Python implementation of the green workflow model: a library
 for building idempotent devops CLIs — YAML desired state, workflows as step
-graphs threaded by a plain dict, template-scaffolded config files, OpenTofu and
-Ansible as the muscle.
+graphs threaded by a plain dict, template-scaffolded config files, and optional
+event-aware OpenTofu and Ansible steps — a package can use them, but does not need them.
 
 **`README.md` is the primary document and it is current.** It covers every
 module under `src/blue/`, the `./blue` uv-script launcher, the examples, and the
@@ -27,7 +27,7 @@ Run one file with `uv run pytest tests/test_workflow.py`, one test with
 suite is opt-in: `BLUE_FLOCI_E2E=1 uv run pytest tests/test_floci_zookeeper.py`.
 
 This repository expects its toolchain on `PATH`; there is no devenv/direnv setup
-here, unlike the downstream `once` repositories.
+here.
 
 ## Blue is one of three, not a standalone library
 
@@ -38,10 +38,12 @@ the same OpenTofu state. Green is the canonical model — when blue and green
 disagree, green is right by default and blue is the thing to fix.
 
 The consequence for work in this repository: **a change to shared behaviour is
-not finished here.** The parity harness that would catch a divergence lives
-downstream in the `once` monorepo (`scripts/parity.sh`), and it feeds one
-fixture to all three colours and diffs the results. A change landed in blue
-alone passes every test in this repository and breaks parity there.
+not finished here.** No test in this repository compares blue with green and
+red. The cross-colour parity harness lived in the now-archived `once` monorepo
+(`scripts/parity.sh`, read-only on GitHub): it fed one fixture to all three
+colours and diffed the results. It remains a reference for what parity means,
+but no current consumer runs it, so a change landed in blue alone can pass
+every test here and still diverge from green.
 
 ### The YAML resolver replacement is load-bearing
 
@@ -52,29 +54,34 @@ about whether `no` is a string, whether `012` is octal, and whether `1:30` is a
 number.
 
 Do not relax, simplify, or "modernise" that block, and do not swap the YAML
-library for one that seems more convenient. `once/test/parity/scalars.yml`
-pins the expected answers and asserts all three colours type every scalar
-identically. A reader that drifts off the 1.2 core schema is a parity break that
+library for one that seems more convenient. The archived `once` monorepo's
+`test/parity/scalars.yml` records the expected answers and asserted that all
+three colours type every scalar identically. A reader that drifts off the 1.2 core schema is a parity break that
 no test in this repository will report.
 
 ## Downstream pinning
 
 Nothing here is published to PyPI. Consumers depend on this repository by
-**pinned git SHA** — `once/blue/pyproject.toml` has the pin under
-`[tool.uv.sources]`, and the installed `package-once-blue` launcher carries a
-copy of it. So:
+**pinned git SHA**. The current consumer is PocketDeploy
+(`github.com/pocketcontext/pocketdeploy`), which imports `blue.cli` and
+`blue.workflow` and pins blue as a direct git reference in the `dependencies`
+of its `pyproject.toml`. The getcolors controllers built on PocketDeploy
+(`alice`, `walter`, `rybbit`) receive blue through their `uv.lock`. The
+archived ONCE package (`once/blue/pyproject.toml`, pinned under
+`[tool.uv.sources]` and copied into the `package-once-blue` launcher) is a
+historical example of the same pattern. So:
 
 - A commit here is invisible downstream until it is pushed *and* the consumer's
-  pin is moved. Never invent a SHA or hand-edit a pin; the `once` monorepo
-  stamps launchers with `bb pin`.
+  pin is moved. Never invent a SHA or hand-edit a pin; move it with the
+  consumer's own procedure (for example `uv lock` in that repository).
 - Consumer docs and launcher snippets must use a pinned git reference. Do not
   recommend `blue==x.y.z` until a PyPI release actually exists.
 - In-repo examples may keep the relative `[tool.uv.sources]` path for
   development.
 
-**Name collision to watch for:** `once/blue/` in the `once` monorepo is a
-different codebase — the ONCE package built *on* this library. Instructions
-there are not instructions for here.
+**Name collision to watch for:** `once/blue/` in the archived `once` monorepo
+is a different codebase — the ONCE package built *on* this library.
+Instructions there are not instructions for here.
 
 ## Documentation
 
