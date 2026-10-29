@@ -4,13 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`blue` is the uv/Python implementation of the green workflow model: a library
-for building idempotent devops CLIs — YAML desired state, workflows as step
-graphs threaded by a plain dict, template-scaffolded config files, and optional
-event-aware OpenTofu and Ansible steps — a package can use them, but does not need them.
+`blue` is the Python/uv workflow SDK of the Colors family: steps `opts ->
+opts`, `wire_fn` graphs with a dynamic `next_fn`, fan-out and joins, layered
+advice, and YAML desired state with a `COLORS_PAR_*` overlay. It is the
+foundation for deployment code written by coding agents; steps call cloud CLIs
+or APIs directly. OpenTofu/Ansible integration, scaffolding, schema gates,
+Kubernetes controllers, resource scopes and the subprocess runner were removed
+on 2026-10-29 — do not reintroduce them here; they belong in packages.
 
 **`README.md` is the primary document and it is current.** It covers every
-module under `src/blue/`, the `./blue` uv-script launcher, the examples, and the
+module under `src/blue/`, the `./blue` uv-script launcher, the example, and the
 naming table that maps `green` → `red` → `blue`. Read it before editing; this
 file only adds what a reader of the README alone would not know.
 
@@ -22,9 +25,8 @@ uv run pytest    # run the test suite
 ```
 
 Run one file with `uv run pytest tests/test_workflow.py`, one test with
-`-k <name>`. The ZooKeeper end-to-end tests drive real `tofu` and **skip when
-`tofu` is not on `PATH`** — a green run does not prove they executed. The floci
-suite is opt-in: `BLUE_FLOCI_E2E=1 uv run pytest tests/test_floci_zookeeper.py`.
+`-k <name>`. `tests/test_example_hello.py` keeps `examples/hello` working; it
+needs `uname` and `cat` on `PATH`.
 
 This repository expects its toolchain on `PATH`; there is no devenv/direnv setup
 here.
@@ -33,8 +35,8 @@ here.
 
 `green` (Clojure/Babashka), `red` (TypeScript/Bun), and `blue` are three
 implementations of one model, and downstream packages built on them are required
-to be byte-compatible: the same desired-state file, the same generated files,
-the same OpenTofu state. Green is the canonical model — when blue and green
+to behave identically: the same desired-state file, the same opts keys, the
+same workflow semantics. Green is the canonical model — when blue and green
 disagree, green is right by default and blue is the thing to fix.
 
 The consequence for work in this repository: **a change to shared behaviour is
@@ -65,7 +67,9 @@ Nothing here is published to PyPI. Consumers depend on this repository by
 **pinned git SHA**. The current consumer is PocketDeploy
 (`github.com/pocketcontext/pocketdeploy`), which imports `blue.cli` and
 `blue.workflow` and pins blue as a direct git reference in the `dependencies`
-of its `pyproject.toml`. The getcolors controllers built on PocketDeploy
+of its `pyproject.toml`. Its contract is `blue.workflow.workflow`/`run`,
+`blue.cli.load_yaml`/`read_pars`/`par_name`, and the `"blue/exit"`/`"blue/err"`
+keys; keep those signatures and behaviour stable. The getcolors controllers built on PocketDeploy
 (`alice`, `walter`, `rybbit`) receive blue through their `uv.lock`. The
 archived ONCE package (`once/blue/pyproject.toml`, pinned under
 `[tool.uv.sources]` and copied into the `package-once-blue` launcher) is a

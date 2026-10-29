@@ -108,16 +108,16 @@ async def test_wire_fn_can_select_an_event_specific_static_graph():
         key = f"{run_opts['blue/event']} {s}"
         return {
             "create t/start": (mark("start"), "t/node"),
-            "create t/node": (mark("node"), "t/ansible"),
-            "create t/ansible": (mark("ansible"),),
-            "delete t/start": (mark("start"), "t/ansible"),
-            "delete t/ansible": (mark("ansible"), "t/node"),
+            "create t/node": (mark("node"), "t/configure"),
+            "create t/configure": (mark("configure"),),
+            "delete t/start": (mark("start"), "t/configure"),
+            "delete t/configure": (mark("configure"), "t/node"),
             "delete t/node": (mark("node"),),
         }.get(key)
 
     w = workflow(start="t/start", wire_fn=wire)
-    assert (await run(w, {"blue/event": "create"}))["seen"] == ["start", "node", "ansible"]
-    assert (await run(w, {"blue/event": "delete"}))["seen"] == ["start", "ansible", "node"]
+    assert (await run(w, {"blue/event": "create"}))["seen"] == ["start", "node", "configure"]
+    assert (await run(w, {"blue/event": "delete"}))["seen"] == ["start", "configure", "node"]
 
 
 async def test_wire_fn_uses_stable_run_opts_not_branch_opts():

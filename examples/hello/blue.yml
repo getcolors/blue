@@ -1,0 +1,9 @@
+# Desired state for the hello example (see ./blue). Flat kebab-case keys;
+# any of them can be overridden for one run with COLORS_PAR_<KEY>, e.g.
+# COLORS_PAR_WORKDIR=/tmp/hello ./blue create
+# A relative workdir is resolved against this file's directory.
+workdir: work
+names:
+  - alice
+  - bob
+  - carol

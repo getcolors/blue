@@ -1,0 +1,126 @@
+#!/usr/bin/env -S uv run --script
+# -*- mode: python-ts; -*-
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["blue"]
+#
+# [tool.uv.sources]
+# blue = { path = "../.." }
+# ///
+# Self-contained blue CLI for a tiny, offline package. Run from anywhere:
+#
+#   ./blue create --dry-run   # print what would run, touch nothing
+#   ./blue create             # write one greeting file per name under work/
+#   ./blue delete             # remove them again
+#
+# Steps call local CLIs directly (`uname`, `cat`), the same way a real package
+# calls `gcloud`, `oci`, `doctl` or an HTTP API. In-repo example: blue is
+# depended on by relative path via [tool.uv.sources]; an external consumer
+# pins a git reference to a commit — never unpinned.
+
+import asyncio
+import sys
+from pathlib import Path
+
+from blue import dry_run, progress
+from blue.cli import exec_cli, run_cli
+from blue.workflow import workflow
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+async def sh(*cmd: str) -> tuple[int, str, str]:
+    """Run a local command and capture its output."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+    except OSError as error:
+        return 127, "", str(error)
+    out, err = await proc.communicate()
+    return proc.returncode, out.decode(), err.decode()
+
+
+def workdir(opts) -> Path:
+    """Resolve workdir against the desired-state file's directory."""
+    base = Path(opts["blue/state-file"]).parent
+    return base / str(opts.get("workdir") or "work")
+
+
+# --- steps: opts -> opts ------------------------------------------------------
+
+
+async def system_step(opts):
+    code, out, err = await sh("uname", "-s")
+    if code != 0:
+        return {**opts, "blue/exit": code, "blue/err": f"uname failed: {err.strip()}"}
+    return {**opts, "hello/system": out.strip()}
+
+
+def greet_step(opts):
+    """One branch per name (fanned out by next_fn)."""
+    name = opts["hello/name"]
+    target = workdir(opts) / f"{name}.txt"
+    if opts.get("blue/event") == "delete":
+        target.unlink(missing_ok=True)
+        return {**opts, "hello/file": str(target)}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"hello {name} from {opts['hello/system']}\n")
+    return {**opts, "hello/file": str(target)}
+
+
+async def report_step(opts):
+    """Join: runs once, after every greet branch, with their results."""
+    files = sorted(b["hello/file"] for b in opts["blue/branches"])
+    if opts.get("blue/event") == "delete":
+        directory = workdir(opts)
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+        return {**opts, "hello/report": f"removed {len(files)} files"}
+    code, out, err = await sh("cat", *files)
+    if code != 0:
+        return {**opts, "blue/exit": code, "blue/err": f"cat failed: {err.strip()}"}
+    print(out, end="")
+    return {**opts, "hello/report": out}
+
+
+# --- workflow -----------------------------------------------------------------
+
+
+def wire_fn(step, _run_opts):
+    return {
+        "hello/system": (system_step, "hello/greet"),
+        "hello/greet": (greet_step, "hello/report"),
+        "hello/report": (report_step,),
+    }.get(step)
+
+
+def next_fn(step, default_next, opts):
+    if (opts.get("blue/exit") or 0) > 0:
+        return []
+    if step == "hello/system":
+        return [("hello/greet", {**opts, "hello/name": n}) for n in opts["names"]]
+    return [(s, opts) for s in (default_next or [])]
+
+
+wf = workflow(start="hello/system", wire_fn=wire_fn, next_fn=next_fn)
+# --dry-run skips the steps that change or report files; uname still runs
+wf = dry_run.advise(wf, ["hello/greet", "hello/report"])
+wf = progress.advise(wf)
+
+
+def file_arg(a):
+    return a in ("-f", "--file") or a.startswith("--file=")
+
+
+def default_args(args):
+    return args if any(file_arg(a) for a in args) else [*args, "-f", f"{SCRIPT_DIR}/blue.yml"]
+
+
+def run(*args):
+    """REPL/test-friendly entrypoint: resolves without calling sys.exit."""
+    return run_cli(wf, default_args(list(args)), allowed_events=["create", "delete"])
+
+
+if __name__ == "__main__":
+    exec_cli(wf, default_args(sys.argv[1:]), allowed_events=["create", "delete"])

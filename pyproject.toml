@@ -1,19 +1,17 @@
 [project]
 name = "blue"
 version = "0.1.0"
-description = "blue — the uv/Python implementation of the green/red workflow model: idempotent devops CLIs from YAML desired state, step-graph workflows, template scaffolding, OpenTofu and Ansible."
+description = "blue — the Python/uv workflow SDK of the green/red/blue family: opts->opts steps, wire_fn/next_fn graphs, layered advice, and YAML desired state with a COLORS_PAR_* overlay."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
-    "pydantic>=2.7",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "typing-extensions>=4.0",
 ]
 
 [build-system]

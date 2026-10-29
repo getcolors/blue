@@ -4,36 +4,101 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>blue — specification</title>
+<meta name="description" content="Specification of blue, the Python/uv workflow SDK of Colors: opts-to-opts steps, wire_fn graphs with a dynamic next_fn, fan-out and joins, layered advice, and YAML desired state with a COLORS_PAR_* overlay.">
+<link rel="icon" href="https://www.getcolors.ai/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: light;
-    --bg: #f7f9ff; --fg: #1d2433; --muted: #5d667a; --accent: #2563eb;
-    --card: #ffffff; --border: #d9e3f5; --code-bg: #eef4ff; --code-fg: #182235;
-    --th-bg: #e8f0ff;
+    --ink: oklch(20% 0.01 260);
+    --code-ink: oklch(35% 0.01 260);
+    --muted: oklch(45% 0.01 260);
+    --soft: oklch(55% 0.01 260);
+    --line: oklch(91% 0.005 260);
+    --page: oklch(99% 0.002 90);
+    --surface: oklch(97.5% 0.003 260);
+    --panel: oklch(97% 0.005 260);
+    --red: oklch(60% 0.19 25);
+    --green: oklch(65% 0.17 145);
+    --blue: oklch(55% 0.18 260);
+    --accent: var(--blue);
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 0 1rem 4rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
-  main { max-width: 56rem; margin: 0 auto; }
-  h1 { font-size: 2.2rem; margin: 2.5rem 0 0; letter-spacing: -0.02em; }
-  h1 .v { color: var(--muted); font-size: 1rem; font-weight: 400; margin-left: .75rem; }
-  p.tagline { color: var(--muted); margin-top: .35rem; font-size: 1.1rem; }
-  h2 { font-size: 1.45rem; margin: 2.75rem 0 .75rem; padding-bottom: .3rem; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; }
-  h3 { font-size: 1.1rem; margin: 1.75rem 0 .5rem; }
-  a { color: var(--accent); }
-  code, pre { font: 0.875em/1.55 "SF Mono", ui-monospace, Menlo, Consolas, monospace; background: var(--code-bg); color: var(--code-fg); border-radius: 5px; }
-  code { padding: .12em .35em; }
-  pre { padding: .9rem 1.1rem; overflow-x: auto; border: 1px solid var(--border); }
-  pre code { padding: 0; background: none; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
-  th, td { text-align: left; padding: .5rem .75rem; border: 1px solid var(--border); vertical-align: top; }
-  th { background: var(--th-bg); font-weight: 600; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.65 var(--sans); overflow-x: hidden; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--ink); }
+
+  /* header, after the site's SiteHeader */
+  .site-header { position: sticky; top: 0; z-index: 100; border-bottom: 1px solid transparent; background: oklch(99% 0.002 90 / 0%); transition: background-color 240ms ease, border-color 240ms ease, box-shadow 240ms ease; }
+  .site-header.is-scrolled { border-color: oklch(91% 0.005 260 / 75%); background: oklch(99% 0.002 90 / 82%); box-shadow: 0 10px 30px oklch(20% 0.01 260 / 7%); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 24px; max-width: 1120px; margin: 0 auto; padding: 22px 24px; transition: padding 240ms ease; }
+  .site-header.is-scrolled .nav { padding-block: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+  .brand:hover { color: var(--ink); }
+  .brand img { border-radius: 4px; }
+  .brand span { font-family: var(--mono); font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .nav-links { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; }
+  .nav-links a { color: var(--muted); text-decoration: none; }
+  .nav-links a:hover, .nav-links a[aria-current="page"] { color: var(--accent); }
+  .nav-links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* content */
+  main { max-width: 56rem; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+  .eyebrow { font: 500 13px/1.4 var(--mono); color: var(--accent); letter-spacing: 0.04em; text-transform: uppercase; margin: 1.5rem 0 .5rem; }
+  h1, h2, h3 { font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; color: var(--ink); }
+  h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); margin: 0; padding-left: 1rem; border-left: 4px solid var(--accent); }
+  h1 .v { display: block; color: var(--soft); font: 400 .9rem/1.6 var(--mono); letter-spacing: 0; margin-top: .25rem; }
+  .lede { font-size: 1.15rem; color: var(--muted); margin: 1.25rem 0 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  h2 { font-size: 1.35rem; margin: 3rem 0 .85rem; padding-left: .75rem; border-left: 3px solid var(--accent); }
+  h3 { font-size: 1.02rem; margin: 1.9rem 0 .5rem; }
+  p, ul, ol { margin: .75rem 0; }
+  ul, ol { padding-left: 1.35rem; }
+  li { margin: .25rem 0; }
+  code, pre { font-family: var(--mono); font-size: .86em; }
+  code { color: var(--code-ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: .05em .3em; overflow-wrap: anywhere; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: .9rem 1.1rem; line-height: 1.55; overflow-x: auto; max-width: 100%; }
+  pre code { background: none; border: 0; padding: 0; color: var(--code-ink); font-size: 1em; overflow-wrap: normal; }
+  .table { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { background: var(--panel); font: 500 .8rem/1.5 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   td code { white-space: nowrap; }
-  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
-  .toc ol { margin: .25rem 0; padding-left: 1.25rem; }
-  .note { border-left: 3px solid var(--accent); background: var(--card); padding: .65rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
-  .note strong:first-child { color: var(--accent); }
-  ul, ol { padding-left: 1.4rem; }
-  li { margin: .2rem 0; }
+  .toc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; margin: 2rem 0; }
+  .toc strong { font: 500 13px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--soft); }
+  .toc ol { columns: 2 16rem; column-gap: 2rem; margin: .5rem 0 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .note { border-left: 3px solid var(--accent); background: var(--surface); padding: .7rem 1rem; margin: 1.1rem 0; border-radius: 0 8px 8px 0; }
+  .note strong:first-child { color: var(--accent); font-weight: 600; }
+  .colors { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+  .color { border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 8px; background: var(--surface); padding: .75rem 1rem; }
+  .color b { font-family: var(--mono); color: var(--c); }
+  .color span { display: block; color: var(--muted); font-size: .9rem; }
+
+  /* footer, after the site's SiteFooter */
+  .foot { border-top: 1px solid var(--line); padding: 28px 0; }
+  .foot-inner { max-width: 1120px; margin: 0 auto; padding-inline: 24px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; font-size: 13px; color: var(--soft); }
+  .foot a { color: var(--soft); text-decoration: none; }
+  .foot a:hover { color: var(--accent); }
+  .foot .home { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); }
+  .foot .home img { border-radius: 4px; }
+  .foot .links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+
+  @media (max-width: 600px) {
+    .nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+    .site-header.is-scrolled .nav { padding-block: 8px; }
+    .nav-links { width: 100%; justify-content: space-between; gap: 4px 12px; font-size: 13px; }
+    .nav-links a { display: flex; align-items: center; min-height: 36px; }
+    .foot-inner { padding-inline: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .site-header, .nav { transition: none; } }
 </style>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VKP1WY4QJ"></script>
 <script>
@@ -45,126 +110,147 @@
 <script src="https://rybbit.getcolors.ai/api/script.js" data-site-id="9fb9c41a6d49" defer></script>
 </head>
 <body>
+<header class="site-header" id="site-header">
+  <div class="nav">
+    <a class="brand" href="https://www.getcolors.ai/" aria-label="Colors — home">
+      <img src="https://www.getcolors.ai/favicon.svg" width="20" height="20" alt="">
+      <span>Colors</span>
+    </a>
+    <nav class="nav-links" aria-label="Main navigation">
+      <a href="https://getcolors.github.io/green/">Green</a>
+      <a href="https://getcolors.github.io/red/">Red</a>
+      <a href="https://getcolors.github.io/blue/" aria-current="page">Blue</a>
+      <a href="https://github.com/pocketcontext/pocketdeploy">PocketDeploy</a>
+      <a href="https://github.com/getcolors/blue">GitHub</a>
+    </nav>
+  </div>
+</header>
+
 <main>
 
-<h1>blue <span class="v">specification · 2026-07-10</span></h1>
-<p class="tagline">A uv/Python library for building idempotent devops CLIs: desired state in YAML, workflows as step graphs threaded by one plain dict, Selmer-style template-scaffolded configuration, and optional event-aware OpenTofu and Ansible steps — a package can use them, but does not need them.</p>
+<p class="eyebrow">Python / uv workflow SDK</p>
+<h1>blue <span class="v">specification · 2026-10-29</span></h1>
+<p class="lede">Coding agents write deployment code directly; Terraform and Ansible are no longer the layer in between. <strong>The colors are the foundation for that code</strong>: three workflow SDKs, Green, Red and Blue, sharing one model in Clojure, TypeScript and Python. Blue is the Python one. <a href="https://github.com/pocketcontext/pocketdeploy">PocketDeploy</a> is the starter package built on it.</p>
+
+<div class="colors">
+  <div class="color" style="--c: var(--green)"><b>green</b><span>Clojure / Babashka · canonical · <code>./green</code></span></div>
+  <div class="color" style="--c: var(--red)"><b>red</b><span>TypeScript / Bun · <code>./red</code></span></div>
+  <div class="color" style="--c: var(--blue)"><b>blue</b><span>Python / uv · <code>./blue</code> · this page</span></div>
+</div>
 
 <div class="toc">
 <strong>Contents</strong>
 <ol>
   <li><a href="#philosophy">Philosophy</a></li>
-  <li><a href="#naming">Naming, desired state &amp; the opts contract</a></li>
+  <li><a href="#opts">Naming &amp; the opts contract</a></li>
   <li><a href="#steps">Steps and errors</a></li>
-  <li><a href="#workflow">Workflows: wire_fn, next_fn, and composition</a></li>
+  <li><a href="#workflow">Workflows: wire_fn and next_fn</a></li>
   <li><a href="#parallel">Parallelism, fan-out &amp; joins</a></li>
   <li><a href="#advice">Advice</a></li>
-  <li><a href="#config">blue.yml and validation gates</a></li>
-  <li><a href="#scaffold">The scaffolding DSL and renderer</a></li>
-  <li><a href="#tofu">OpenTofu integration</a></li>
-  <li><a href="#ansible">Ansible integration</a></li>
-  <li><a href="#dryrun">Dry-run, progress, and runtime</a></li>
+  <li><a href="#config">YAML desired state &amp; COLORS_PAR_*</a></li>
+  <li><a href="#optional">Dry-run, progress &amp; lifecycle</a></li>
   <li><a href="#cli">The CLI and ./blue launcher</a></li>
-  <li><a href="#examples">Examples</a></li>
-  <li><a href="#testing">Testing strategy</a></li>
-  <li><a href="#layout">Project layout &amp; API index</a></li>
+  <li><a href="#example">The example</a></li>
+  <li><a href="#testing">Testing</a></li>
+  <li><a href="#api">API index</a></li>
 </ol>
 </div>
 
 <h2 id="philosophy">1. Philosophy</h2>
 <ul>
-  <li><strong>blue is a library.</strong> Users define steps, wiring, and workflows in their own project; blue supplies the engine, infrastructure helpers, template rendering, advice, and CLI plumbing.</li>
-  <li><strong>Everything is one dict.</strong> Desired state is YAML loaded into <code>opts</code>. Every step reads and returns that plain dict, possibly enriched with observed reality such as OpenTofu outputs or Ansible recaps.</li>
-  <li><strong>Idempotent apply.</strong> There is no plan phase in blue itself. Re-running the same event should converge. <code>create</code> and <code>delete</code> are conventions; the event set is open.</li>
-  <li><strong>Errors are values.</strong> Steps report outcome with <code>"blue/exit"</code>. Raised exceptions are caught at step boundaries and converted into opts values, so failures can route through <code>next_fn</code> and joins like any other result.</li>
-  <li><strong>Python/uv only.</strong> blue is the uv/Python implementation of green's canonical workflow model while preserving red-compatible APIs. A red project ports mechanically by replacing red names with blue names and TypeScript modules with Python modules.</li>
+  <li><strong>blue is a small library.</strong> A package defines its own steps, wiring and launcher; blue supplies the engine, advice, YAML loading and CLI plumbing. Its only runtime dependency is PyYAML.</li>
+  <li><strong>Steps call tools directly.</strong> A step calls <code>gcloud</code>, <code>oci</code>, <code>doctl</code>, <code>hcloud</code> or an HTTP API itself, in Python a coding agent writes and maintains. There is no OpenTofu or Ansible integration: it was removed on 2026-10-29 together with template scaffolding, schema gates, Kubernetes controllers, resource scopes and the subprocess runner.</li>
+  <li><strong>Everything is one dict.</strong> Desired state is YAML loaded into <code>opts</code>; every step reads that dict and returns a new one, enriched with what it observed.</li>
+  <li><strong>Idempotent runs.</strong> Re-running the same event should converge. <code>create</code> and <code>delete</code> are conventions; the event set is open.</li>
+  <li><strong>Errors are values.</strong> Steps report outcome in <code>"blue/exit"</code>. Exceptions are caught at the step boundary and converted, so failures route through <code>next_fn</code> and joins like any other result.</li>
+  <li><strong>One model, three languages.</strong> Green is canonical; a Red project ports to Blue by mechanical rename.</li>
 </ul>
 
-<h2 id="naming">2. Naming, desired state &amp; the opts contract</h2>
-<p>Everything called <code>green</code> in the original model and <code>red</code> in the TypeScript implementation is called <code>blue</code> here. Clojure keywords become namespaced string keys, and keyword values become plain strings.</p>
-<table>
+<h2 id="opts">2. Naming &amp; the opts contract</h2>
+<div class="table"><table>
 <tr><th>green</th><th>red</th><th>blue</th></tr>
 <tr><td><code>:green/exit</code></td><td><code>"red/exit"</code></td><td><code>"blue/exit"</code></td></tr>
-<tr><td><code>:green.scaffold/written</code></td><td><code>"red.scaffold/written"</code></td><td><code>"blue.scaffold/written"</code></td></tr>
 <tr><td><code>green.edn</code></td><td><code>red.yml</code></td><td><code>blue.yml</code></td></tr>
-<tr><td><code>./green</code></td><td><code>./red</code>, a Bun script</td><td><code>./blue</code>, a uv script</td></tr>
+<tr><td><code>./green</code> (Babashka)</td><td><code>./red</code> (Bun)</td><td><code>./blue</code> (uv script)</td></tr>
 <tr><td><code>green.workflow</code></td><td><code>red/workflow</code></td><td><code>blue.workflow</code></td></tr>
-<tr><td><code>:zk/servers</code></td><td><code>"zk/servers"</code></td><td><code>"zk/servers"</code></td></tr>
-<tr><td><code>:create</code></td><td><code>"create"</code></td><td><code>"create"</code></td></tr>
-</table>
-<p>The base type is open: <code>Opts = dict</code>. blue reserves <code>blue/*</code> and <code>blue.*/*</code> keys; project and library state should live under namespace-like keys such as <code>"zk/servers"</code>, <code>"once/workdir"</code>, or <code>"tofu/outputs"</code>.</p>
-<table>
+<tr><td><code>:hello/file</code></td><td><code>"hello/file"</code></td><td><code>"hello/file"</code></td></tr>
+</table></div>
+<p><code>Opts</code> is an open <code>dict</code>. blue reserves <code>blue/*</code> and <code>blue.*/*</code>; project state lives under namespace-like keys such as <code>"hello/file"</code>.</p>
+<div class="table"><table>
 <tr><th>Key</th><th>Meaning</th></tr>
-<tr><td><code>"blue/event"</code></td><td>First positional CLI argument: <code>"create"</code>, <code>"delete"</code>, <code>"rotate"</code>, etc.</td></tr>
-<tr><td><code>"blue/dry-run"</code></td><td>Stamped by <code>--dry-run</code>; dry-run advice uses it to skip named steps.</td></tr>
-<tr><td><code>"blue/exit"</code></td><td>Integer outcome. Missing means success and is normalized to <code>0</code> after a step returns.</td></tr>
+<tr><td><code>"blue/event"</code></td><td>First positional CLI argument: <code>"create"</code>, <code>"delete"</code>, <code>"rotate"</code>, ...</td></tr>
+<tr><td><code>"blue/dry-run"</code></td><td><code>True</code> when <code>--dry-run</code> is passed.</td></tr>
+<tr><td><code>"blue/state-file"</code></td><td>Absolute path of the loaded YAML file, so a package resolves its relative paths against the file rather than the working directory.</td></tr>
+<tr><td><code>"blue/exit"</code></td><td>Integer outcome. Missing means success and is normalised to <code>0</code> after a step.</td></tr>
 <tr><td><code>"blue/err"</code></td><td>Error message when <code>"blue/exit"</code> is positive.</td></tr>
-<tr><td><code>"blue/trace"</code></td><td>Stack trace string when a raised exception is converted to a blue failure.</td></tr>
-<tr><td><code>"blue/step"</code></td><td>Current step name, stamped before each step runs. Advice such as progress reads it.</td></tr>
-<tr><td><code>"blue/branches"</code></td><td>List of per-branch result dicts at a join or collapsed failed fork. Sort by your own key if order matters.</td></tr>
-<tr><td><code>"blue.workflow/inherited"</code></td><td>Private advice-inheritance payload. It is stripped from public step and workflow results.</td></tr>
-</table>
-<div class="note"><strong>Step input is frozen.</strong> The engine deep-freezes opts at each step boundary using <code>FrozenDict</code> and <code>FrozenList</code>, and recursively freezes tuple and frozenset members. Unsupported mutable values and custom instances fail before the step runs. Callables remain usable; their captured state is outside this guarantee. Steps should return new dicts with <code>{**opts, ...}</code> instead of mutating input. If a step raises, the failure opts are built from the frozen input so partial mutation cannot leak.</div>
+<tr><td><code>"blue/trace"</code></td><td>Stack trace when a raised exception is converted.</td></tr>
+<tr><td><code>"blue/step"</code></td><td>Current step name, stamped before each step runs.</td></tr>
+<tr><td><code>"blue/branches"</code></td><td>Per-branch results at a join or collapsed failed fork.</td></tr>
+<tr><td><code>"blue.workflow/inherited"</code></td><td>Private advice-inheritance payload, stripped from public results.</td></tr>
+</table></div>
+<div class="note"><strong>Step input is frozen.</strong> The engine deep-freezes opts at each step boundary (<code>FrozenDict</code>, <code>FrozenList</code>; tuple and frozenset members recursively). Unsupported mutable values and custom instances fail before the step runs; callables stay usable. Return new dicts with <code>{**opts, ...}</code>. If a step raises, the failure is built from the frozen input, so partial mutation cannot leak.</div>
 
 <h2 id="steps">3. Steps and errors</h2>
-<p>A step is a plain sync or async function <code>(opts) -&gt; opts</code>, named by a namespaced string such as <code>"zk/node"</code>. The name anchors wiring, logging, CLI slices, joins, and advice.</p>
+<p>A step is a plain sync or async function <code>(opts) -&gt; opts</code>, named by a namespaced string such as <code>"hello/greet"</code>. The name anchors wiring, logging, CLI slices, joins and advice.</p>
 <ul>
-  <li>A returned dict without <code>"blue/exit"</code> is treated as success and stamped with <code>0</code>.</li>
-  <li>Returning a non-dict, list, or missing return is a step failure.</li>
-  <li>Raising is allowed: the runner catches the exception and returns <code>"blue/exit": 1</code>, plus <code>"blue/err"</code> and <code>"blue/trace"</code>.</li>
-  <li>Raise <code>StepError(message, exit=n)</code> when a step or advice wants to choose a specific failure exit code.</li>
-  <li>Steps usually branch on <code>"blue/event"</code>. Library steps use the convention “any non-<code>"delete"</code> event creates/applies; <code>"delete"</code> destroys/deprovisions.”</li>
-  <li>Async steps must await everything they start. A stray un-awaited exception cannot be attributed to a branch; <code>exec_cli</code> reports unhandled loop exceptions and exits nonzero.</li>
+  <li>A returned dict without <code>"blue/exit"</code> is success and is stamped <code>0</code>.</li>
+  <li>Returning a non-dict is a step failure.</li>
+  <li>Raising is allowed: the boundary returns <code>"blue/exit": 1</code> with <code>"blue/err"</code> and <code>"blue/trace"</code>. Raise <code>StepError(message, exit=n)</code> to choose the code.</li>
+  <li>Steps usually branch on <code>"blue/event"</code>: any non-<code>"delete"</code> event creates or converges, <code>"delete"</code> removes.</li>
+  <li>Async steps must await everything they start; <code>exec_cli</code> reports a stray unhandled loop exception and exits nonzero.</li>
 </ul>
-<pre><code>from blue.workflow import Opts, StepError
+<pre><code>import asyncio
+from blue.workflow import Opts, StepError
+
+
+async def system(opts: Opts) -&gt; Opts:
+    proc = await asyncio.create_subprocess_exec(
+        "uname", "-s", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await proc.communicate()
+    if proc.returncode:
+        return {**opts, "blue/exit": proc.returncode, "blue/err": err.decode().strip()}
+    return {**opts, "hello/system": out.decode().strip()}
 
 
 def check(opts: Opts) -&gt; Opts:
-    if not opts.get("app/name"):
-        raise StepError("app/name is required", exit=2)
-    return {**opts, "blue/exit": 0}</code></pre>
-<p>The helper <code>failed(opts)</code> is true when <code>(opts.get("blue/exit") or 0) &gt; 0</code>. Without a <code>next_fn</code>, a failed step produces no successors and that branch halts. With a <code>next_fn</code>, cleanup, retries, and alternate paths are ordinary user routing.</p>
+    if not opts.get("names"):
+        raise StepError("names is required", exit=2)
+    return opts</code></pre>
+<p><code>failed(opts)</code> is true when <code>(opts.get("blue/exit") or 0) &gt; 0</code>. Without a <code>next_fn</code>, a failed step has no successors and its branch halts.</p>
 
-<h2 id="workflow">4. Workflows: wire_fn, next_fn, and composition</h2>
-<pre><code>from blue.workflow import Opts, run, step, workflow
+<h2 id="workflow">4. Workflows: wire_fn and next_fn</h2>
+<pre><code>from blue.workflow import run, step, workflow
 
 wf = workflow(
-    start="zk/start",      # required
-    end=None,              # optional inclusive slice boundary
+    start="hello/system",  # required
     wire_fn=wire_fn,       # required static graph
     next_fn=next_fn,       # optional dynamic router
+    end=None,              # optional inclusive slice boundary
 )
-
-result = await run(wf, {"blue/event": "create"})</code></pre>
+result = await run(wf, {"blue/event": "create", "names": ["alice"]})</code></pre>
 
 <h3>wire_fn — the static graph</h3>
-<p><code>wire_fn(step, run_opts)</code> returns a tuple/list containing the step function followed by its default successors for this run. <code>run_opts</code> is the initial opts passed to <code>run</code>, so the graph may depend on stable run-level inputs such as <code>"blue/event"</code>.</p>
+<p><code>wire_fn(step, run_opts)</code> returns the step function followed by its default successors, or <code>None</code> for an unknown step. <code>run_opts</code> is the initial opts of the run, so the graph can depend on stable inputs such as <code>"blue/event"</code> but never on values produced during the run.</p>
 <pre><code>def wire_fn(step: str, run_opts: Opts):
-    match step:
-        case "zk/start":
-            return (start_step, "zk/node")
-        case "zk/node":
-            return (node_step, "zk/zoo-cfg")
-        case "zk/zoo-cfg":
-            return (zoo_cfg_step,)
-        case "ci/fork":
-            return (fork_step, "ci/a", "ci/b")</code></pre>
-<p>Multiple successors mean a static fork. The same graph is used for join scheduling, so keep the happy path visible even when <code>next_fn</code> adds dynamic behavior. Do not base <code>wire_fn</code> on values produced after the run starts; route those cases in <code>next_fn</code>.</p>
+    return {
+        "hello/system": (system_step, "hello/greet"),
+        "hello/greet": (greet_step, "hello/report"),
+        "hello/report": (report_step,),
+    }.get(step)</code></pre>
+<p>Several successors form a static fork. The same graph drives join scheduling, so keep the happy path visible in it.</p>
 
 <h3>next_fn — the dynamic router</h3>
-<p>When present, <code>next_fn</code> decides successors after each non-end step:</p>
 <pre><code>next_fn(step, default_next, opts)  # -&gt; iterable of (next_step, opts) pairs</code></pre>
 <ul>
-  <li>Return <code>[]</code>, <code>None</code>, or any falsy iterable to terminate a branch; return one pair to continue; return many pairs to fan out in parallel.</li>
-  <li>Because it sees the step result, including <code>"blue/exit"</code>, <code>next_fn</code> can route failures to cleanup, retry, or halt.</li>
-  <li>Without <code>next_fn</code>, positive <code>"blue/exit"</code> stops that path; otherwise the default successors run.</li>
+  <li>Return nothing to end the branch, one pair to continue, many to fan out in parallel.</li>
+  <li>It sees the step result, including <code>"blue/exit"</code>, so it can route failures to cleanup or retries.</li>
+  <li>Without <code>next_fn</code>, a positive exit stops the path; otherwise the default successors run.</li>
 </ul>
-<pre><code>def next_fn(step: str, default_next: list | None, opts: Opts):
+<pre><code>def next_fn(step, default_next, opts):
     if (opts.get("blue/exit") or 0) &gt; 0:
         return []
-    if step == "zk/start":
-        return [("zk/node", {**opts, "zk/node": server})
-                for server in opts["zk/servers"]]
+    if step == "hello/system":
+        return [("hello/greet", {**opts, "hello/name": n}) for n in opts["names"]]
     return [(s, opts) for s in (default_next or [])]</code></pre>
 
 <h3>Composition — a workflow is a step</h3>
@@ -172,360 +258,159 @@ result = await run(wf, {"blue/event": "create"})</code></pre>
 step(sub_workflow,
      in_fn=lambda opts: sub_opts,
      out_fn=lambda opts, sub_result: parent_result)</code></pre>
-<ul>
-  <li>The sub-workflow's result is just a step result, so failures propagate through parent routing naturally.</li>
-  <li>With default <code>in_fn</code>, ambient keys such as <code>"blue/event"</code> and <code>"blue/dry-run"</code> flow into the child. If custom <code>in_fn</code> builds opts from scratch, carry the ambient keys the child needs.</li>
-  <li>Advice inheritance is preserved even when <code>in_fn</code> rebuilds opts from scratch. This lets a parent impose dry-run, backend, audit, or provider advice on embedded workflows by flat step name.</li>
-</ul>
+<p>The sub-workflow's result is an ordinary step result, so its exit propagates through the parent's routing. Ambient keys such as <code>"blue/event"</code> and <code>"blue/dry-run"</code> flow in with the default <code>in_fn</code>; advice inheritance survives an <code>in_fn</code> that rebuilds opts from scratch.</p>
 
 <h3>Slices</h3>
-<p>The optional <code>end</code> step is inclusive: it runs, then the workflow stops. The CLI's <code>--start</code> and <code>--end</code> override workflow boundaries for safe idempotent slice runs.</p>
+<p><code>end</code> is inclusive: it runs, then the workflow stops. The CLI's <code>--start</code> and <code>--end</code> override the boundaries for one run.</p>
 
 <h2 id="parallel">5. Parallelism, fan-out &amp; joins</h2>
 <ul>
   <li><strong>Static fork:</strong> <code>wire_fn</code> lists several successors.</li>
-  <li><strong>Dynamic fan-out:</strong> <code>next_fn</code> returns several <code>(step, opts)</code> pairs.</li>
-  <li><strong>Join:</strong> branches from different origins that converge on the same step run that step once, using the deepest shared fork's opts plus <code>"blue/branches"</code>.</li>
-  <li><strong>Same-origin fan-out:</strong> same-step entries from one fan-out parent run independently instead of joining, which is how dynamic N-way item processing works.</li>
-  <li><strong>Failure:</strong> a failed branch inside a fork lets siblings finish their current step, collapses the fork, skips the join, and propagates the worst exit with all branch results under <code>"blue/branches"</code>.</li>
+  <li><strong>Dynamic fan-out:</strong> <code>next_fn</code> returns several pairs. Independent successors run as concurrent asyncio tasks.</li>
+  <li><strong>Join:</strong> branches from different origins converging on one step run it once, with the deepest shared fork's opts plus <code>"blue/branches"</code>.</li>
+  <li><strong>Same-origin fan-out:</strong> entries from one fan-out parent at the same step run independently; that is how N-way item processing works.</li>
+  <li><strong>Failure:</strong> a failed branch lets siblings finish their current step, collapses the fork, skips the join and propagates the worst exit with every branch result under <code>"blue/branches"</code>. On equal codes the first incoming branch's diagnostics win.</li>
 </ul>
-<div class="note"><strong>Join detection.</strong> Convergence is by flat step name. The scheduler waits while another live branch can statically reach the same step through this run's <code>wire_fn</code> graph; dynamic detours not visible in that graph may require explicit routing care.</div>
-
-<h3>Scheduler algorithm in plain English</h3>
-<ol>
-  <li>Start with one live task: run <code>start</code> with the initial opts.</li>
-  <li>Loop while work remains, tracking live branches and finished terminals.</li>
-  <li>Group live entries by step.</li>
-  <li>Run only ready steps: if a different live branch can still reach a step, wait so it can join.</li>
-  <li>Run ready units concurrently with asyncio tasks.</li>
-  <li>Expand each result into zero, one, or many next entries.</li>
-  <li>When different origins arrive at one step, run a join unit once.</li>
-  <li>Collapse failed forks before scheduling more work.</li>
-  <li>Finalize to one opts dict: first failure wins, otherwise the last success.</li>
-</ol>
-
-<h3>Independent pipelines inside a fan-out</h3>
-<p>When <code>next_fn</code> fans out N branches and each branch traverses multiple steps in sequence, converging on the same second step can be interpreted as a join. Wrap the per-item pipeline in a sub-workflow with <code>step(sub_workflow)</code> when the count is dynamic — N items, N nodes, N tenants.</p>
-<pre><code>pipeline_wf = workflow(
-    start="item/validate",
-    wire_fn=lambda step, _run_opts: {
-        "item/validate": (validate, "item/transform"),
-        "item/transform": (transform, "item/load"),
-        "item/load": (load,),
-    }.get(step),
-)
-
-
-def parent_wire_fn(step_name: str, _run_opts: Opts):
-    return {
-        "batch/start": (start, "batch/process"),
-        "batch/process": (step(pipeline_wf),),
-    }.get(step_name)</code></pre>
-<div class="note"><strong>When you don't need <code>step</code>.</strong> If the number of branches is fixed and known at design time, distinct step names work: <code>"deploy/staging"</code> and <code>"deploy/production"</code> never converge, so they run independently without a sub-workflow.</div>
-
-<p>A join consumes the deepest fork shared by all incoming branches and preserves its enclosing forks. Failed joins use the highest exit code and that branch's error and trace. Equal codes select the first incoming branch.</p>
-
-<p>YAML plain scientific notation, octal and hexadecimal values are numeric. Date-like and sexagesimal values remain strings. Quoted scalars remain strings. Unknown CLI options return exit 2 before workflow execution.</p>
+<div class="note"><strong>Join detection.</strong> Convergence is by flat step name. The scheduler waits while another live branch can still reach the step through this run's static graph; dynamic detours invisible to <code>wire_fn</code> need explicit routing care. For a multi-step pipeline per fanned-out item, wrap it in <code>step(sub_workflow)</code> so the items do not join early.</div>
 
 <h2 id="advice">6. Advice</h2>
-<p>Advice wraps step functions without changing graph wiring. Registries are immutable workflow data; adding/removing advice returns a new workflow.</p>
-<pre><code>from blue.workflow import advice_add, advice_add_all, advice_remove, advice_remove_all
+<p>Advice wraps step functions without changing the graph. Registries are immutable workflow values: adding or removing advice returns a new workflow.</p>
+<pre><code>from blue.workflow import advice_add, advice_add_all, advice_remove, advice_remove_all, advice_plan
 
-advised = advice_add(wf, "zk/node", "before", "app/backend", write_backend)
-with_progress = advice_add_all(advised, "around", "app/progress", progress)
-without_backend = advice_remove(with_progress, "zk/node", "app/backend")
-quiet = advice_remove_all(without_backend, "app/progress")</code></pre>
-<table>
-<tr><th>How</th><th>Effect</th><th>Use cases</th></tr>
-<tr><td><code>"around"</code></td><td><code>advice(base, opts)</code></td><td>Dry-run, retry, timing, locks; may call the base zero, one, or many times.</td></tr>
-<tr><td><code>"override"</code></td><td><code>advice(opts)</code>, base never runs</td><td>Replace/stub a step.</td></tr>
-<tr><td><code>"before"</code></td><td>Advice side effect, then base; advice return ignored</td><td>Setup: backend files, inventories, directories, locks.</td></tr>
-<tr><td><code>"after"</code></td><td>Base, then advice side effect; base return flows out</td><td>Audit, metrics, notifications, cleanup.</td></tr>
-<tr><td><code>"before-while"</code></td><td>Continue inward only while advice returns truthy</td><td>Validation and policy gates.</td></tr>
-<tr><td><code>"before-until"</code></td><td>Use advice result when it is truthy; otherwise base</td><td>Fast path / already converged no-op.</td></tr>
-<tr><td><code>"after-while"</code></td><td>Run advice only when the inward result is blue-true</td><td>Success-only verification or registration.</td></tr>
-<tr><td><code>"after-until"</code></td><td>Use inward result if blue-true; otherwise advice fallback</td><td>Recovery or alternate result.</td></tr>
-<tr><td><code>"filter-args"</code></td><td>Transform opts before base</td><td>Normalize/scope inputs.</td></tr>
-<tr><td><code>"filter-return"</code></td><td>Transform base result</td><td>Normalize/enrich outputs.</td></tr>
-</table>
-<p>Advice functions may be sync or async; composition awaits each layer. For while/until combinators, blue uses Clojure-style truthiness: only <code>None</code> and <code>False</code> are falsy, so <code>0</code> and <code>""</code> are truthy. For <code>after-while</code> and <code>after-until</code>, a step-result dict is true when <code>"blue/exit"</code> is missing or zero and false when it is positive.</p>
-<p>Stacking is Emacs-like. At equal <code>depth</code>, newest advice is outermost. <code>depth</code> (<code>-100..100</code>, default <code>0</code>) overrides add order: lower depths run farther outside, higher depths farther inside. Re-adding the same id replaces the old entry and moves it according to the new sequence/depth.</p>
-<p><strong>Advice inheritance through <code>step</code>.</strong> The enclosing run stamps its effective advice into opts under a private key, and the nested run merges that advice over the child's own registries. Ancestor entries are outermost at equal depth; same-id ancestor entries replace child entries. Use <code>advice_plan(wf, step)</code> or <code>advice_plan([parent, child], step)</code> to inspect the composed stack.</p>
+wf2 = advice_add(wf, "hello/greet", "before-while", "hello/policy", allowed)
+wf3 = advice_add_all(wf2, "around", "hello/timing", timing, {"depth": -50})
+advice_plan(wf3, "hello/greet")   # the composed stack, outermost first</code></pre>
+<div class="table"><table>
+<tr><th>How</th><th>Effect</th></tr>
+<tr><td><code>around</code></td><td><code>advice(base, opts)</code>; may call the base zero, one or many times.</td></tr>
+<tr><td><code>override</code></td><td><code>advice(opts)</code>; the base never runs.</td></tr>
+<tr><td><code>before</code> / <code>after</code></td><td>Side effect before or after the base; the base's result flows out.</td></tr>
+<tr><td><code>before-while</code></td><td>Continue inward only while advice returns truthy (gates).</td></tr>
+<tr><td><code>before-until</code></td><td>Use the advice result when truthy, otherwise the base (fast paths).</td></tr>
+<tr><td><code>after-while</code></td><td>Run advice only when the inward result succeeded.</td></tr>
+<tr><td><code>after-until</code></td><td>Keep a successful inward result, otherwise use the advice fallback.</td></tr>
+<tr><td><code>filter-args</code> / <code>filter-return</code></td><td>Transform opts before the base, or its result after.</td></tr>
+</table></div>
+<p>Advice may be sync or async. While/until use Clojure truthiness (only <code>None</code> and <code>False</code> are falsy); a step-result dict counts as true when its exit is missing or zero. At equal <code>depth</code> the newest advice is outermost; <code>depth</code> (<code>-100..100</code>, default <code>0</code>) overrides add order, lower being farther out. Re-adding an id replaces the entry. Through <code>step</code> embeds, the parent's advice is inherited by flat step name, outermost, and a same-id ancestor entry replaces the child's.</p>
 
-<h2 id="config">7. blue.yml and validation gates</h2>
-<p>Explicit <code>-f/--file</code> paths always take precedence over configured defaults. Parent-directory search only applies when the file option is omitted.</p>
-<p>The CLI reads <code>blue.yml</code> by default (override with <code>-f/--file</code>), parses it with PyYAML plus YAML 1.2 core-schema scalar behavior, stamps the lifecycle event, and passes the resulting dict to <code>run</code>.</p>
-<pre><code>zk/workdir: work
-zk/servers:
-  - {id: 1, name: zk1, ip: 10.0.0.1}
-  - {id: 2, name: zk2, ip: 10.0.0.2}
-  - {id: 3, name: zk3, ip: 10.0.0.3}
+<h2 id="config">7. YAML desired state &amp; COLORS_PAR_*</h2>
+<p><code>load_yaml(text)</code> parses desired state with YAML 1.2 core-schema scalars, matching green and red: only <code>true</code>/<code>false</code> variants are booleans (<code>no</code>, <code>on</code> stay strings); <code>012</code> is decimal, <code>0o12</code> octal, <code>0x1f</code> hex; scientific notation is numeric; dates and sexagesimal values such as <code>1:30</code> stay strings. Empty input loads as <code>{}</code>.</p>
+<pre><code>workdir: work
+names:
+  - alice
+  - bob
+# Quote version-like values; YAML reads 3.10 as a number.
+python-version: "3.10"</code></pre>
+<p>Credentials and one-run overrides come from the environment, never from the YAML file. <code>read_pars(opts, env=None)</code> overlays every <code>COLORS_PAR_&lt;KEY&gt;</code> variable onto the flat key <code>&lt;key&gt;</code> (lower-cased, <code>_</code> to <code>-</code>), coercing to the existing value's type when it was a bool or int. <code>par_name(key)</code> is the inverse. The prefix is shared by all three colors.</p>
+<pre><code>from blue.cli import load_yaml, par_name, read_pars
 
-# Quote version-like values; YAML would parse 3.10 as a number.
-zk/version: "3.10"</code></pre>
+par_name("api-token")                       # "COLORS_PAR_API_TOKEN"
+read_pars({"port": 80}, {"COLORS_PAR_PORT": "8080"})  # {"port": 8080}</code></pre>
+<div class="note"><strong>Keep desired-state keys flat and kebab-case</strong> so the overlay can reach them; use namespaced keys for state that steps add.</div>
+
+<h2 id="optional">8. Dry-run, progress &amp; lifecycle</h2>
+<p>All three are optional and built on advice, not special cases in the engine. Their log lines go through <code>blue.runtime.runtime.log</code>, a mutable seam tests can replace.</p>
 <ul>
-  <li>Namespaced keys such as <code>zk/servers</code> parse unquoted.</li>
-  <li>blue's loader treats values like <code>no</code>, <code>yes</code>, <code>on</code>, and <code>off</code> as strings; only true/false variants are booleans.</li>
-  <li>Validation should happen at boundaries and/or as <code>before-while</code> gates.</li>
-</ul>
-<p><code>schema_gate(schema, exit=2)</code> builds a Pydantic-backed <code>before-while</code> advice. Gates validate and return the original opts; they must not replace opts with the parsed output because Pydantic can drop or transform unrelated namespace keys.</p>
-<pre><code>from typing_extensions import TypedDict
-from blue.gates import schema_gate
-from blue.workflow import advice_add
-
-# Functional TypedDict syntax carries namespaced string keys.
-Server = TypedDict("Server", {"id": int, "name": str})
-State = TypedDict("State", {"zk/servers": list[Server]})
-
-gated = advice_add(wf, "zk/start", "before-while",
-                   "zk/state-schema", schema_gate(State))</code></pre>
-
-<h2 id="scaffold">8. The scaffolding DSL and renderer</h2>
-<p><code>scaffold(opts, specs)</code> materializes or removes a flat sequence of file specs:</p>
-<pre><code>from pathlib import Path
-from blue.scaffold import scaffold
-
-main_tf = (Path(__file__).parent / "templates/main.tf").read_text()
-
-specs = [{
-    "template": {"name": "zk/main.tf", "content": main_tf},
-    "target": "{{workdir}}/nodes/{{node.id}}/main.tf",
-    "data": {"workdir": opts["zk/workdir"], "node": node},
-}]
-
-return scaffold(opts, specs)</code></pre>
-<table>
-<tr><th>Key</th><th>Meaning</th></tr>
-<tr><td><code>template</code></td><td><code>{"name", "content"}</code>. The content should be read by the owning package, next to the module or via <code>importlib.resources</code>. There is no runtime template lookup.</td></tr>
-<tr><td><code>target</code></td><td>Output path, itself rendered with the same renderer against <code>data</code>.</td></tr>
-<tr><td><code>data</code></td><td>Template data for both body and target path.</td></tr>
-<tr><td><code>opts</code></td><td>Optional render options, including delimiter overrides.</td></tr>
-</table>
-<p>On <code>"blue/event": "delete"</code>, the same specs name targets to remove. The implementation removes files and prunes the immediate parent directory if it becomes empty. Return keys are <code>"blue.scaffold/written"</code> or <code>"blue.scaffold/deleted"</code>.</p>
-<p>The renderer implements the Selmer-compatible subset blue exercises: variables, dotted paths, missing values as empty, HTML escaping by default, <code>safe</code>, <code>sort(attribute='...')</code>, <code>for</code> loops, and delimiter overrides (<code>tag_open</code>, <code>tag_close</code>, <code>filter_open</code>, <code>filter_close</code>). Delimiter overrides are useful when scaffolded Ansible files must preserve Jinja2 <code>{{ }}</code> and <code>{% %}</code>.</p>
-
-<h2 id="tofu">9. OpenTofu integration</h2>
-<pre><code>from blue.tofu import local_backend_advice, s3_backend_advice, tofu_step
-
-
-async def apply_node(opts: Opts) -&gt; Opts:
-    return await tofu_step(opts, dir=f"{opts['zk/workdir']}/node-{opts['zk/id']}")</code></pre>
-<ul>
-  <li>Any non-<code>"delete"</code> event: <code>tofu init -input=false -no-color</code>, then <code>tofu apply -auto-approve -input=false -no-color</code>, then <code>tofu output -json</code>.</li>
-  <li><code>"delete"</code>: <code>tofu init</code>, then <code>tofu destroy -auto-approve -input=false -no-color</code>.</li>
-  <li>Apply outputs are parsed to <code>{name: value}</code> and assoc'd under <code>"tofu/outputs"</code> by default. If you override <code>output_key</code>, keep it namespaced.</li>
-  <li>Non-zero process exits become <code>"blue/exit"</code> and <code>"blue/err"</code>.</li>
-  <li>All subprocesses go through <code>runtime.exec</code>, which tests can stub.</li>
-</ul>
-<p>Backends are not hardwired. <code>backend_advice</code> writes <code>backend.tf.json</code> for any backend type and config dict (or function of opts), preserving native JSON values and nested collections. Helpers ship for local, S3, and GCS.</p>
-<pre><code>wf = advice_add(
-    wf,
-    "zk/tofu",
-    "before",
-    "zk/backend",
-    local_backend_advice(lambda opts: f"{opts['zk/workdir']}/node-{opts['zk/id']}"),
-)</code></pre>
-
-<h2 id="ansible">10. Ansible integration</h2>
-<pre><code>from blue.ansible import ansible_step, inventory_advice
-
-
-async def provision(opts: Opts) -&gt; Opts:
-    return await ansible_step(
-        opts,
-        dir="ansible",
-        inventory="inventory.ini",
-        private_key="work/ssh/id_ed25519",
-        user="root",
-        host_key_checking=False,
-    )</code></pre>
-<ul>
-  <li>Any non-<code>"delete"</code> event runs the create playbook (<code>create.yml</code> by default); <code>"delete"</code> runs the delete playbook (<code>delete.yml</code> by default). Override with <code>playbooks</code>.</li>
-  <li>Options map to <code>ansible-playbook</code>: <code>inventory</code>, <code>private_key</code>, <code>user</code>, <code>extra_vars</code> (JSON <code>-e</code>), and <code>host_key_checking=False</code> (exports <code>ANSIBLE_HOST_KEY_CHECKING=False</code>).</li>
-  <li>On success, PLAY RECAP is parsed into per-host counters under <code>"ansible/recap"</code> by default; override with namespaced <code>recap_key</code>.</li>
-  <li><code>inventory_ini</code> renders deterministic INI from <code>{group: {"hosts": [{"name", "vars"}], "vars": {...}}}</code>. Strings preserve whitespace, quotes, backslashes and literal-looking values such as <code>"123"</code>. Host values include shell quoting around their Python literal; group values use the literal directly.</li>
-  <li><code>inventory_advice</code> is a <code>before</code> advice that writes an inventory file from data or a function of opts, mirroring OpenTofu backend advice.</li>
-  <li><code>ansible_with_spec</code> scaffolds then runs on create, and runs then removes scaffolded files on delete.</li>
-</ul>
-
-<h2 id="dryrun">11. Dry-run, progress, and runtime</h2>
-<p>Dry-run and progress are advice layers, not special cases in the engine.</p>
-<ul>
-  <li><code>dry_run.advise(wf, steps)</code> attaches <code>around</code> advice id <code>"blue.dry-run/skip"</code> to named steps. With <code>"blue/dry-run"</code>, it logs <code>dry-run: would run &lt;step&gt; (&lt;event&gt;)</code> and returns success without calling the step.</li>
-  <li><code>progress.advise(wf)</code> attaches all-step <code>around</code> advice id <code>"blue.progress/progress"</code>. It logs <code>&gt;&gt;&gt; &lt;step&gt; (&lt;event&gt;)</code> before and <code>&lt;&lt;&lt; &lt;step&gt; (&lt;n&gt;ms)</code> after, reading <code>"blue/step"</code>.</li>
-  <li><code>runtime.exec(cmd, cwd=None, env=None)</code> is the single subprocess seam used by OpenTofu and Ansible helpers.</li>
-  <li><code>runtime.log(*args)</code> is the single log seam used by dry-run and progress.</li>
+  <li><code>dry_run.advise(wf, steps)</code> adds around advice <code>"blue.dry-run/skip"</code> to the listed steps. With <code>"blue/dry-run"</code> set it logs <code>dry-run: would run &lt;step&gt; (&lt;event&gt;)</code> and returns success without calling the step. Unlisted steps still run, so read-only discovery can stay live.</li>
+  <li><code>progress.advise(wf)</code> adds all-step around advice <code>"blue.progress/progress"</code>, logging <code>&gt;&gt;&gt; &lt;step&gt; (&lt;event&gt;)</code> and <code>&lt;&lt;&lt; &lt;step&gt; (&lt;n&gt;ms)</code>.</li>
+  <li><code>lifecycle.preflight(original, *, defaults, overlay, validators, after_validate, env)</code> merges defaults, applies an overlay, runs every validator <code>(opts, env, context)</code> and returns exit <code>2</code> with all errors joined, or calls <code>after_validate</code> (sync or async). <code>context</code> carries <code>event</code> and <code>real</code> (not a dry run).</li>
 </ul>
 <pre><code>from blue import dry_run, progress
+wf = progress.advise(dry_run.advise(wf, ["hello/greet", "hello/report"]))</code></pre>
 
-wf2 = progress.advise(
-    dry_run.advise(wf, ["zk/scaffold", "zk/tofu", "zk/ansible"])
-)</code></pre>
-
-<h2 id="cli">12. The CLI and ./blue launcher</h2>
+<h2 id="cli">9. The CLI and ./blue launcher</h2>
 <pre><code>./blue &lt;event&gt; [-f|--file blue.yml] [--start step] [--end step] [--dry-run]
-
-./blue create
+./blue create --dry-run
 ./blue delete -f prod.yml
-./blue create --start zk/node --end zk/node
-./blue create --dry-run</code></pre>
+./blue create --start hello/greet --end hello/greet</code></pre>
 <ul>
-  <li>The first positional argument is stamped into <code>"blue/event"</code>.</li>
-  <li><code>--start</code> and <code>--end</code> override workflow boundaries.</li>
-  <li><code>--dry-run</code> stamps <code>"blue/dry-run": True</code>; it has an effect only on steps advised with <code>blue.dry-run</code>.</li>
-  <li>Missing event, missing state file, YAML parse errors, or other CLI config errors return exit <code>2</code> from <code>run_cli</code>.</li>
-  <li><code>exec_cli</code> prints <code>"blue/err"</code> and <code>"blue/trace"</code> to stderr and exits with <code>"blue/exit"</code>.</li>
+  <li><code>run_cli(wf, args, *, default_file="blue.yml", search_parents=False, allowed_events=None)</code> parses arguments, loads the file, applies <code>read_pars</code>, stamps <code>"blue/state-file"</code>, <code>"blue/event"</code> and <code>"blue/dry-run"</code>, and returns the final opts.</li>
+  <li>An explicit <code>-f</code> always wins; with <code>search_parents</code>, <code>find_up</code> looks for the default file in parent directories only when <code>-f</code> is omitted.</li>
+  <li>A missing or disallowed event, unknown option, missing file or YAML error returns exit <code>2</code> before any step runs.</li>
+  <li><code>exec_cli(wf, args=None, **config)</code> runs <code>run_cli</code>, prints <code>"blue/err"</code> and <code>"blue/trace"</code> to stderr, and exits with <code>"blue/exit"</code>.</li>
 </ul>
-<p>A project's <code>./blue</code> is a self-contained uv script: executable, with a <code>#!/usr/bin/env -S uv run --script</code> shebang and PEP 723 inline metadata. It owns the workflow definition, advice wiring, <code>exec_cli</code> call, and reads of local templates.</p>
+<p>A package's <code>./blue</code> is a self-contained uv script: a <code>#!/usr/bin/env -S uv run --script</code> shebang and PEP 723 metadata, holding the workflow, advice wiring and the <code>exec_cli</code> call.</p>
 <pre><code>#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["blue"]
+# dependencies = ["blue @ git+https://github.com/getcolors/blue.git@&lt;commit&gt;"]
 # ///
 from blue import Opts, exec_cli, workflow
-
 
 def start(opts: Opts) -&gt; Opts:
     return {**opts, "app/seen": True}
 
-
-def wire_fn(step: str, _run_opts: Opts):
-    if step == "app/start":
-        return (start,)
-
-
-wf = workflow(start="app/start", wire_fn=wire_fn)
+wf = workflow(start="app/start", wire_fn=lambda s, _: {"app/start": (start,)}.get(s))
 
 if __name__ == "__main__":
-    exec_cli(wf)</code></pre>
-<div class="note"><strong>Consumer imports.</strong> External consumers should pin blue, either as a released version such as <code>blue==x.y.z</code> or a pinned git reference. In-repo examples use PEP 723 <code>[tool.uv.sources]</code> with a relative path; do not recommend unpinned dependencies.</div>
+    exec_cli(wf, allowed_events=["create", "delete"])</code></pre>
+<div class="note"><strong>Pin by commit.</strong> blue is not published to PyPI. Consumers pin a git commit and move the pin with their own procedure (for example <code>uv lock</code>); the in-repo example uses a relative <code>[tool.uv.sources]</code> path.</div>
 
-<h2 id="examples">13. Examples</h2>
-<p>Each example is a self-contained uv CLI that imports this checkout by relative path and keeps desired state in <code>blue.yml</code>.</p>
-<table>
-<tr><th>Path</th><th>What it teaches</th></tr>
-<tr><td><code>examples/zookeeper</code></td><td>Fake 3-node cluster: dynamic fan-out from desired state, join at <code>zk/zoo-cfg</code>, scaffolding plus OpenTofu, backend-as-advice, and dry-run.</td></tr>
-<tr><td><code>examples/multi-zookeeper</code></td><td>Workflow composition: one cluster workflow embedded with <code>step</code>, fanned out once per cluster, with inherited parent advice.</td></tr>
-<tr><td><code>examples/once</code></td><td>ONCE-style single VPS with provider-swap advice, <code>compute ∥ smtp → dns → smtp-post → (ansible-local ∥ ansible-remote)</code>, per-step tofu state, and scaffold-only Ansible files.</td></tr>
-<tr><td><code>examples/multi-once</code></td><td>Many ONCE boxes from one workflow. The parent replaces inherited provider/backend advice; S3 state keys are isolated by deployment and step. Dry-run is offline.</td></tr>
-<tr><td><code>examples/floci-zookeeper</code></td><td>Real local ZooKeeper on floci: OpenTofu targets floci, Ansible provisions over SSH, delete routes through Ansible before destroys, validation gates and retry advice are used. Non-dry-run needs Linux, Docker, floci, tofu, ansible-playbook, docker, and aws.</td></tr>
-</table>
-<pre><code>cd examples/zookeeper
-./blue create --dry-run
-./blue create
-./blue delete
-
-cd ../multi-zookeeper
-./blue create --dry-run
-./blue create
-./blue delete
-
-cd ../once
-./blue create --dry-run
-./blue create
-./blue delete
-
-cd ../multi-once
-./blue create --dry-run   # offline path; real create needs an S3 bucket
-./blue create
-./blue delete
-
-cd ../floci-zookeeper
-./blue create --dry-run   # offline path; real create needs Linux + Docker + floci
-./blue create
+<h2 id="example">10. The example</h2>
+<p><code>examples/hello</code> is the smallest complete package. Its steps call local CLIs the way a real package calls a cloud CLI:</p>
+<ul>
+  <li><code>hello/system</code> runs <code>uname -s</code> and stores <code>"hello/system"</code>; a failing command becomes <code>"blue/exit"</code>/<code>"blue/err"</code> and stops the run.</li>
+  <li><code>next_fn</code> fans out one <code>hello/greet</code> per entry in <code>names</code>; each writes or removes <code>&lt;workdir&gt;/&lt;name&gt;.txt</code>.</li>
+  <li>The branches join at <code>hello/report</code>, which reads <code>"blue/branches"</code> and runs <code>cat</code> over the files on create, or removes the empty directory on delete.</li>
+  <li>A relative <code>workdir</code> resolves against <code>"blue/state-file"</code>; <code>COLORS_PAR_WORKDIR</code> overrides it for one run.</li>
+</ul>
+<pre><code>cd examples/hello
+./blue create --dry-run   # uname runs; greet and report are skipped and logged
+./blue create             # hello alice from Linux ...
 ./blue delete</code></pre>
 
-<h2 id="testing">14. Testing strategy</h2>
-<p>The suite runs with <code>uv run pytest</code>. Test files are discovered under <code>tests/</code>.</p>
+<h2 id="testing">11. Testing</h2>
+<p><code>uv run pytest</code> runs the suite under <code>tests/</code> with pytest-asyncio in auto mode; CI runs it on Python 3.11, 3.12 and 3.13.</p>
 <ul>
-  <li><code>tests/test_workflow.py</code> covers linear runs, errors, slices, event-specific static graphs, dynamic routing, fork/join, failure collapse, concurrency, and composition.</li>
-  <li><code>tests/test_advice.py</code> covers every advice combinator, ordering/depth, all-step advice, removal/replacement, and inheritance through <code>step</code>.</li>
-  <li><code>tests/test_scaffold.py</code> covers template rendering, create/delete symmetry, and idempotent rendering.</li>
-  <li><code>tests/test_tofu.py</code> and <code>tests/test_ansible.py</code> stub <code>runtime.exec</code> instead of shelling out.</li>
-  <li><code>tests/test_cli.py</code>, <code>tests/test_dry_run.py</code>, <code>tests/test_progress.py</code>, and <code>tests/test_gates.py</code> cover CLI flags, advice helpers, logging, and Pydantic validation gates.</li>
-  <li><code>tests/test_zookeeper.py</code> is the e2e suite: if <code>tofu</code> is on <code>PATH</code>, it runs real render/apply/output/destroy cycles over HCL containing only <code>locals</code> and <code>output</code> blocks.</li>
-  <li><code>tests/test_floci_zookeeper.py</code> is opt-in with <code>BLUE_FLOCI_E2E=1</code> because it requires Docker/floci, Ansible, provider downloads, and minutes of runtime.</li>
+  <li><code>test_workflow.py</code> and <code>test_advice.py</code> pin the engine: routing, freezing, joins, failed forks, composition, combinators, depth and inheritance.</li>
+  <li><code>test_cli.py</code> pins argument parsing, the YAML 1.2 scalar table and the <code>COLORS_PAR_*</code> overlay.</li>
+  <li><code>test_dry_run.py</code>, <code>test_progress.py</code> and <code>test_package_conventions.py</code> cover the optional modules and the public export list.</li>
+  <li><code>test_example_hello.py</code> runs <code>examples/hello</code> in-process and as a script: create, dry-run, delete, the overlay, a failing CLI and the exit codes.</li>
 </ul>
+<p>Test a package's own steps by calling them with plain dicts, or stub the CLI they call by putting a fake executable first on <code>PATH</code>.</p>
 
-<h2 id="layout">15. Project layout &amp; API index</h2>
-<pre><code>blue/
-├── pyproject.toml       uv/Python package metadata and dependencies
-├── uv.lock              Locked dependency graph
-├── README.md            User-facing overview
-├── index.html           This specification
-├── src/blue/
-│   ├── advice.py        nadvice combinators and pure registry ops
-│   ├── workflow.py      workflow, run, step, advice add/remove/all, advice_plan
-│   ├── renderer.py      small internal Selmer-compatible renderer
-│   ├── scaffold.py      flat file-spec DSL over text-read templates
-│   ├── tofu.py          tofu_step, outputs, backend advices (local/s3/gcs)
-│   ├── ansible.py       ansible_step, ansible_with_spec, recap parsing, inventory advice
-│   ├── dry_run.py       dry-run advice + advise
-│   ├── progress.py      progress advice + advise
-│   ├── cli.py           run_cli, exec_cli, arg parsing, YAML loader
-│   ├── gates.py         Pydantic schema gates
-│   ├── runtime.py       mutable subprocess/log seam
-│   └── __init__.py      root re-exports
-├── tests/               advice, workflow, scaffold, cli, dry-run, progress, tofu, ansible, gates, zookeeper
-└── examples/            zookeeper, multi-zookeeper, once, multi-once, floci-zookeeper</code></pre>
+<h2 id="api">12. API index</h2>
+<div class="table"><table>
+<tr><th>Module</th><th>Public names</th></tr>
+<tr><td><code>blue.workflow</code></td><td><code>workflow</code>, <code>run</code>, <code>step</code>, <code>failed</code>, <code>advice_add</code>, <code>advice_add_all</code>, <code>advice_remove</code>, <code>advice_remove_all</code>, <code>advice_plan</code>, <code>Workflow</code>, <code>Opts</code>, <code>StepError</code></td></tr>
+<tr><td><code>blue.cli</code></td><td><code>load_yaml</code>, <code>read_pars</code>, <code>par_name</code>, <code>find_up</code>, <code>run_cli</code>, <code>exec_cli</code>, <code>USAGE</code></td></tr>
+<tr><td><code>blue.advice</code></td><td>The combinators and registry operations behind the workflow functions.</td></tr>
+<tr><td><code>blue.dry_run</code></td><td><code>advise</code>, <code>advice</code>, <code>SKIP_ID</code></td></tr>
+<tr><td><code>blue.progress</code></td><td><code>advise</code>, <code>progress</code>, <code>PROGRESS_ID</code></td></tr>
+<tr><td><code>blue.lifecycle</code></td><td><code>preflight</code></td></tr>
+<tr><td><code>blue.runtime</code></td><td><code>runtime.log</code></td></tr>
+</table></div>
+<p>The top-level <code>blue</code> package re-exports the workflow and CLI names plus <code>runtime</code> and the <code>advice</code>, <code>dry_run</code>, <code>lifecycle</code> and <code>progress</code> modules. PocketDeploy and the packages built on it use only <code>blue.workflow.workflow</code>, <code>blue.workflow.run</code>, <code>blue.cli.load_yaml</code>, <code>read_pars</code>, <code>par_name</code> and the <code>"blue/exit"</code>/<code>"blue/err"</code> keys; those stay stable.</p>
 
-<h3>Distribution</h3>
-<p>Library package name: <code>blue</code>. Version in this checkout: <code>0.1.0</code>.</p>
-<ul>
-  <li><strong>Current development:</strong> in-repo examples depend on this checkout by relative path via uv <code>[tool.uv.sources]</code>.</li>
-  <li><strong>External consumers:</strong> pin a released version such as <code>blue==x.y.z</code> or use a pinned git reference.</li>
-  <li><strong>Launcher style:</strong> project CLIs should be self-contained uv scripts, not generated wrappers.</li>
-</ul>
-
-<table>
-<tr><th>Function / export</th><th>Signature / purpose</th></tr>
-<tr><td><code>workflow</code></td><td><code>workflow(start, wire_fn, end=None, next_fn=None) -&gt; Workflow</code>; <code>wire_fn</code> is <code>(step, run_opts) -&gt; (fn, *next)</code>.</td></tr>
-<tr><td><code>run</code></td><td><code>await run(workflow, opts) -&gt; Opts</code>; runs the scheduler and returns final opts.</td></tr>
-<tr><td><code>step</code></td><td><code>step(workflow, in_fn=None, out_fn=None) -&gt; StepFn</code>; embeds a workflow as an ordinary step.</td></tr>
-<tr><td><code>StepError</code></td><td>Error subclass with <code>exit</code>; raise to choose a step failure exit code.</td></tr>
-<tr><td><code>failed</code></td><td><code>failed(opts) -&gt; bool</code>; true when <code>"blue/exit"</code> is positive.</td></tr>
-<tr><td><code>advice_add</code></td><td><code>(workflow, step, how, id, fn, props=None) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>advice_remove</code></td><td><code>(workflow, step, id) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>advice_add_all</code></td><td><code>(workflow, how, id, fn, props=None) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>advice_remove_all</code></td><td><code>(workflow, id) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>advice_plan</code></td><td><code>(workflow_or_chain, step) -&gt; list[dict]</code>; printable advice stack.</td></tr>
-<tr><td><code>advice.HOWS</code>, <code>advice.ordered</code>, <code>advice.compose</code></td><td>Low-level advice combinator set, ordering, and wrapper composition.</td></tr>
-<tr><td><code>advice.add</code>, <code>advice.remove_id</code>, <code>advice.add_global</code>, <code>advice.remove_global_id</code></td><td>Low-level pure registry operations used by <code>blue.workflow</code>.</td></tr>
-<tr><td><code>advice.merge_entries</code>, <code>advice.merge_registry</code></td><td>Low-level inheritance helpers for composing parent/child advice registries.</td></tr>
-<tr><td><code>render</code></td><td><code>(template, data, opts=None) -&gt; str</code>; render a template string.</td></tr>
-<tr><td><code>render_template</code></td><td><code>(template, data, opts=None) -&gt; str</code>; render a <code>{"name", "content"}</code> template dict.</td></tr>
-<tr><td><code>scaffold</code></td><td><code>(opts, specs) -&gt; opts</code>; create or delete rendered targets.</td></tr>
-<tr><td><code>tofu.outputs</code></td><td><code>await outputs(dir) -&gt; dict</code>; parse <code>tofu output -json</code>.</td></tr>
-<tr><td><code>tofu.tofu_step</code></td><td><code>await tofu_step(opts, dir=..., output_key="tofu/outputs") -&gt; Opts</code>.</td></tr>
-<tr><td><code>tofu.backend_advice</code></td><td><code>(dir_fn, type, config) -&gt; before_advice</code>; write <code>backend.tf.json</code>.</td></tr>
-<tr><td><code>tofu.local_backend_advice</code></td><td><code>(dir_fn, config=None) -&gt; before_advice</code>.</td></tr>
-<tr><td><code>tofu.s3_backend_advice</code></td><td><code>(dir_fn, config) -&gt; before_advice</code>.</td></tr>
-<tr><td><code>tofu.gcs_backend_advice</code></td><td><code>(dir_fn, config) -&gt; before_advice</code>.</td></tr>
-<tr><td><code>ansible.default_playbooks</code></td><td>Default event-to-playbook map: <code>{"create": "create.yml", "delete": "delete.yml"}</code>.</td></tr>
-<tr><td><code>ansible.playbook</code></td><td><code>(opts, playbooks=None) -&gt; str</code>; select create/delete playbook.</td></tr>
-<tr><td><code>ansible.parse_recap</code></td><td><code>(ansible_output) -&gt; per_host_counters</code>.</td></tr>
-<tr><td><code>ansible.ansible_step</code></td><td><code>await ansible_step(opts, **config) -&gt; Opts</code>.</td></tr>
-<tr><td><code>ansible.ansible_with_spec</code></td><td><code>await ansible_with_spec(opts, specs, **config) -&gt; Opts</code>; scaffold/run ordering for Ansible.</td></tr>
-<tr><td><code>ansible.inventory_ini</code></td><td><code>(groups) -&gt; str</code>; deterministic INI renderer.</td></tr>
-<tr><td><code>ansible.inventory_advice</code></td><td><code>(file_fn, groups) -&gt; before_advice</code>; write inventory before a step.</td></tr>
-<tr><td><code>dry_run.advice</code></td><td><code>(step) -&gt; around_advice</code>.</td></tr>
-<tr><td><code>dry_run.advise</code></td><td><code>(workflow, steps) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>progress.progress</code></td><td>All-step around advice that logs entry/exit timing.</td></tr>
-<tr><td><code>progress.advise</code></td><td><code>(workflow) -&gt; Workflow</code>.</td></tr>
-<tr><td><code>schema_gate</code></td><td><code>(pydantic_schema, exit=2) -&gt; before_while_advice</code>; validate without transforming opts.</td></tr>
-<tr><td><code>USAGE</code></td><td>CLI usage string.</td></tr>
-<tr><td><code>load_yaml</code></td><td><code>(text) -&gt; Opts</code>; YAML 1.2 core-schema scalar loader.</td></tr>
-<tr><td><code>run_cli</code></td><td><code>await run_cli(workflow, args) -&gt; Opts</code>; non-exiting CLI runner.</td></tr>
-<tr><td><code>exec_cli</code></td><td><code>exec_cli(workflow, args=None) -&gt; None</code>; print errors and exit process.</td></tr>
-<tr><td><code>ExecResult</code></td><td>Dataclass result from subprocess execution: <code>{exit, out, err}</code>.</td></tr>
-<tr><td><code>runtime</code></td><td>Mutable <code>{exec, log}</code> seam used by subprocess and logging helpers.</td></tr>
-</table>
-
-<h2 id="kubernetes">Kubernetes controllers</h2>
-<p><code>blue.kubernetes</code> reconciles package workflows with bounded polling workers,
-state-identity locks, optimistic status writes, and deletion finalizers.
-The kubectl transport uses an explicit context or in-cluster authentication.
-Read the <a href="docs/kubernetes.md">controller contract</a>.</p>
 </main>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <a class="home" href="https://www.getcolors.ai/" aria-label="Colors — home">
+      <img src="https://www.getcolors.ai/favicon.svg" width="20" height="20" alt="">
+      <span>Colors</span>
+    </a>
+    <div class="links">
+      <a href="https://www.getcolors.ai/">www.getcolors.ai</a>
+      <a href="https://www.getcolors.ai/blog">Blog</a>
+      <a href="https://github.com/getcolors/blue">GitHub</a>
+      <a href="https://github.com/pocketcontext/pocketdeploy">PocketDeploy</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var header = document.getElementById("site-header");
+    var pending = false;
+    function update() { header.classList.toggle("is-scrolled", window.scrollY > 24); pending = false; }
+    update();
+    window.addEventListener("scroll", function () {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(update);
+    }, { passive: true });
+  })();
+</script>
 </body>
 </html>

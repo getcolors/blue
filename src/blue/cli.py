@@ -146,14 +146,6 @@ def find_up(name: str, start: str | None = None) -> str | None:
         directory = directory.parent
 
 
-def stage_dir(opts: Opts, tool: str, *, default_workdir: str = ".colors",
-              default_profile: str = "default", state_file_key: str = "blue/state-file") -> str:
-    workdir = Path(str(opts.get("workdir") or default_workdir))
-    state_file = opts.get(state_file_key)
-    root = Path(str(state_file)).parent / workdir if not workdir.is_absolute() and isinstance(state_file, str) else workdir
-    return str(root / str(opts.get("profile") or default_profile) / tool)
-
-
 async def run_cli(workflow: Workflow, args: list[str], *, default_file: str = "blue.yml",
                   search_parents: bool = False, allowed_events: list[str] | None = None) -> Opts:
     """Parse `args`, load the desired state, stamp "blue/event", run

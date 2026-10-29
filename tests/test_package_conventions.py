@@ -1,20 +1,51 @@
-from blue.cli import find_up, stage_dir
+import blue
+from blue.cli import find_up
 from blue.lifecycle import preflight
-from blue.process import posix_quote, run_plan
-from blue.providers import tool_env
-from blue.runtime import ExecResult
-from blue.tofu import conventional_backend_advice
 
 
 async def test_package_conventions_are_reusable(tmp_path):
     state = tmp_path / "colors.yml"
     state.write_text("x: 1\n")
+    (tmp_path / "deep").mkdir()
     assert find_up("colors.yml", str(tmp_path / "deep")) == str(state)
-    assert stage_dir({"blue/state-file": str(state), "profile": "demo"}, "tool") == str(tmp_path / ".colors/demo/tool")
+    assert find_up("absent-colors.yml", str(tmp_path / "deep")) is None
     assert await preflight({"blue/event": "build"}, defaults={"x": 1}, env={}) == {"blue/event": "build", "x": 1, "blue/exit": 0}
-    registry = {"provider": {"x": {"tofu-env": {"token": "TOKEN"}}}}
-    assert tool_env(registry, {"provider": "x", "token": "secret"}, ["provider"]) == {"TOKEN": "secret"}
-    assert posix_quote("a'b") == "'a'\\''b'"
-    result = await run_plan([{"label": "ignored", "args": []}], runner=lambda _: ExecResult(1, "", "gone"), continue_on_error=lambda *_: True)
-    assert result["exit"] == 0
-    assert callable(conventional_backend_advice(dir=lambda _: str(tmp_path), key=lambda _: "demo/tool.tfstate"))
+
+
+async def test_preflight_collects_validator_errors_and_skips_callback():
+    called = []
+    result = await preflight(
+        {"blue/event": "create", "blue/dry-run": True},
+        validators=[lambda opts, env, ctx: ["a missing"], lambda opts, env, ctx: None,
+                    lambda opts, env, ctx: [f"real={ctx['real']}"]],
+        after_validate=lambda *a: called.append(a),
+        env={},
+    )
+    assert result["blue/exit"] == 2
+    assert result["blue/err"] == "a missing\nreal=False"
+    assert called == []
+
+
+async def test_preflight_overlay_and_async_callback_see_environment():
+    async def after(opts, env, ctx):
+        return {**opts, "seen": (env["X"], ctx["event"], ctx["real"]), "blue/exit": 0}
+
+    result = await preflight(
+        {"blue/event": "delete"},
+        overlay=lambda opts, env: {**opts, "token": env["X"]},
+        after_validate=after,
+        env={"X": "secret"},
+    )
+    assert result == {"blue/event": "delete", "token": "secret", "seen": ("secret", "delete", True), "blue/exit": 0}
+
+
+def test_public_api_is_the_reduced_core():
+    assert set(blue.__all__) == {
+        "advice", "dry_run", "lifecycle", "progress",
+        "USAGE", "exec_cli", "find_up", "load_yaml", "par_name", "read_pars", "run_cli",
+        "runtime", "Opts", "StepError", "Workflow",
+        "advice_add", "advice_add_all", "advice_plan", "advice_remove", "advice_remove_all",
+        "failed", "run", "step", "workflow",
+    }
+    for name in blue.__all__:
+        assert hasattr(blue, name)
