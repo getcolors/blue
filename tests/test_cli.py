@@ -1,79 +1,4 @@
-import itertools
-
-from blue.cli import load_yaml, par_name, read_pars, run_cli
-from blue.workflow import workflow
-
-_n = itertools.count()
-
-
-def state_file(tmp_path, content):
-    f = tmp_path / f"state-{next(_n)}.yml"
-    f.write_text(content)
-    return str(f)
-
-
-def probe_wf():
-    return workflow(
-        start="t/a",
-        wire_fn=lambda s, _: {
-            "t/a": (
-                lambda o: {
-                    **o,
-                    "seen": [*o.get("seen", []), ("a", o["blue/event"], o.get("x"))],
-                },
-                "t/b",
-            ),
-            "t/b": (lambda o: {**o, "seen": [*o["seen"], "b"]},),
-        }.get(s),
-    )
-
-
-async def test_event_and_state_flow_into_the_workflow(tmp_path):
-    res = await run_cli(probe_wf(), ["create", "-f", state_file(tmp_path, "x: 1")])
-    assert res["blue/exit"] == 0
-    assert res["seen"] == [("a", "create", 1), "b"]
-
-
-async def test_arbitrary_events_are_allowed(tmp_path):
-    res = await run_cli(probe_wf(), ["provision", "-f", state_file(tmp_path, "x: 2")])
-    assert res["seen"] == [("a", "provision", 2), "b"]
-
-
-async def test_slices_via_start_and_end(tmp_path):
-    # --end is an inclusive boundary
-    ended = await run_cli(
-        probe_wf(), ["create", "-f", state_file(tmp_path, "x: 1"), "--end", "t/a"]
-    )
-    assert ended["seen"] == [("a", "create", 1)]
-    # --start skips earlier steps (t/a never ran, so seen starts empty)
-    started = await run_cli(
-        probe_wf(), ["create", "-f", state_file(tmp_path, "x: 1\nseen: []"), "--start", "t/b"]
-    )
-    assert started["seen"] == ["b"]
-
-
-async def test_dry_run_stamps_the_key(tmp_path):
-    wf = workflow(
-        start="t/a", wire_fn=lambda s, _: (lambda o: {**o, "dry": o.get("blue/dry-run")},)
-    )
-    assert (await run_cli(wf, ["create", "-f", state_file(tmp_path, "{}"), "--dry-run"]))[
-        "dry"
-    ] is True
-    assert (await run_cli(wf, ["create", "-f", state_file(tmp_path, "{}")]))["dry"] is None
-
-
-async def test_usage_errors_exit_2(tmp_path):
-    # missing event
-    no_event = await run_cli(probe_wf(), [])
-    assert no_event["blue/exit"] == 2
-    assert "Usage" in no_event["blue/err"]
-    # missing state file
-    no_file = await run_cli(probe_wf(), ["create", "-f", "/nonexistent/blue.yml"])
-    assert no_file["blue/exit"] == 2
-    assert "not found" in no_file["blue/err"]
-    # unknown flag
-    bad_flag = await run_cli(probe_wf(), ["create", "--bogus"])
-    assert bad_flag["blue/exit"] == 2
+from blue.cli import load_yaml, par_name, read_pars
 
 
 def test_colors_par_overlays_flat_keys_with_type_coercion():
@@ -107,43 +32,6 @@ def test_no_colour_keeps_a_prefix_of_its_own():
     ) == {}
 
 
-async def test_namespaced_keys_and_yaml_1_2_semantics_survive_the_load(tmp_path):
-    wf = workflow(
-        start="t/a",
-        wire_fn=lambda s, _: (lambda o: {**o, "probe": [o.get("zk/workdir"), o.get("answer")]},),
-    )
-    res = await run_cli(
-        wf, ["create", "-f", state_file(tmp_path, "zk/workdir: work\nanswer: no")]
-    )
-    # zk/workdir parses unquoted; `no` is the string "no", not False
-    assert res["probe"] == ["work", "no"]
-
-
-async def test_explicit_file_overrides_configured_default(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "blue.yml").write_text("x: 1")
-    (tmp_path / "colors.yml").write_text("x: 2")
-    for option in (["-f", "blue.yml"], ["--file", "blue.yml"], ["--file=blue.yml"]):
-        result = await run_cli(probe_wf(), ["create", *option], default_file="colors.yml")
-        assert result["seen"][0] == ("a", "create", 1)
-        assert result["blue/state-file"] == str(tmp_path / "blue.yml")
-    result = await run_cli(probe_wf(), ["create"], default_file="colors.yml")
-    assert result["seen"][0] == ("a", "create", 2)
-
-
-async def test_parent_search_only_applies_to_omitted_file(tmp_path, monkeypatch):
-    (tmp_path / "blue.yml").write_text("x: 1")
-    child = tmp_path / "child"
-    child.mkdir()
-    monkeypatch.chdir(child)
-    result = await run_cli(probe_wf(), ["create"], search_parents=True)
-    assert result["blue/state-file"] == str(tmp_path / "blue.yml")
-    for option in (["-f", "blue.yml"], ["--file", "blue.yml"], ["--file=blue.yml"]):
-        result = await run_cli(probe_wf(), ["create", *option], search_parents=True)
-        assert result["blue/exit"] == 2
-        assert "not found" in result["blue/err"]
-
-
 def test_core_scalar_numbers_and_strings():
     import math
     import yaml
@@ -173,3 +61,7 @@ nan: .NaN
     assert math.isnan(loaded["nan"])
     # The SDK's loader must not change PyYAML's process-global safe loader.
     assert yaml.safe_load("value: 1:30.5")["value"] == 90.5
+
+
+def test_namespaced_keys_and_yaml_booleans():
+    assert load_yaml("zk/workdir: work\nanswer: no") == {"zk/workdir": "work", "answer": "no"}

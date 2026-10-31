@@ -2,7 +2,7 @@
 #
 # - wire_fn: (step, run_opts) -> [fn, *next_steps] — the static happy-path
 #   graph for this run. It may depend on stable run-level inputs such as
-#   "blue/event". Multiple successors run in parallel.
+#   "app/event". Multiple successors run in parallel.
 # - next_fn (optional): (step, default_next, opts) -> [(next_step, opts), ...]
 #   — dynamic routing, error branching, fan-out.
 # - Steps report outcome via "blue/exit" (0 ok, >0 error), "blue/err",
@@ -656,8 +656,8 @@ def step(
     """Turn a workflow into a step function (opts -> awaitable opts), so
     workflows compose into higher-level workflows: wire the result like any
     other step, advise it, fan it out. The sub-workflow's "blue/exit"
-    propagates naturally, and ambient keys like "blue/event" and
-    "blue/dry-run" flow in with opts.
+    propagates naturally, and application keys flow in with opts. An explicit
+    out_fn must preserve or deliberately handle the child exit/error.
 
     The enclosing run's advice is inherited: the nested run merges it over
     the sub-workflow's own. The engine re-stamps the inherited registry after

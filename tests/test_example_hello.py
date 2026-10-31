@@ -10,8 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from blue.runtime import runtime
-
 EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "hello"
 LAUNCHER = EXAMPLE / "blue"
 
@@ -26,15 +24,12 @@ def load_launcher():
 
 @pytest.fixture
 def hello(tmp_path, monkeypatch):
-    lines = []
-    monkeypatch.setattr(runtime, "log", lambda *a: lines.append(" ".join(map(str, a))))
     for name in list(os.environ):
         if name.startswith("COLORS_PAR_"):
             monkeypatch.delenv(name)
     state = tmp_path / "blue.yml"
     shutil.copy(EXAMPLE / "blue.yml", state)
     module = load_launcher()
-    module.lines = lines
     module.state = state
     return module
 
@@ -49,16 +44,11 @@ async def test_create_writes_one_file_per_name_and_joins(hello, tmp_path, capsys
     assert result["blue/step"] == "hello/report"
     assert len(result["blue/branches"]) == 3
     assert result["hello/report"] == "".join(f"hello {n} from {system}\n" for n in ["alice", "bob", "carol"])
-    assert capsys.readouterr().out == result["hello/report"]
-    assert hello.lines[0] == ">>> hello/system (create)"
-
-
-async def test_dry_run_touches_nothing(hello, tmp_path):
-    result = await hello.run("create", "--dry-run", "-f", str(hello.state))
-    assert result["blue/exit"] == 0
-    assert not (tmp_path / "work").exists()
-    assert hello.lines.count("dry-run: would run hello/greet (create)") == 3
-    assert "dry-run: would run hello/report (create)" in hello.lines
+    output = capsys.readouterr()
+    assert output.out == result["hello/report"]
+    assert output.err.startswith(">>> hello/system (create)")
+    assert output.err.count(">>> hello/greet (create)") == 3
+    assert output.err.count(">>> hello/verify (create)") == 3
 
 
 async def test_delete_removes_files_and_empty_workdir(hello, tmp_path):
@@ -100,4 +90,42 @@ def test_launcher_script_exit_codes(tmp_path):
     assert "hello carol from" in ok.stdout
     usage = subprocess.run([sys.executable, str(LAUNCHER)], capture_output=True, text=True, env=env)
     assert usage.returncode == 2
-    assert usage.stderr.startswith("Usage: blue <event>")
+    assert "event" in usage.stderr
+
+
+async def test_invalid_names_fail_before_writing(hello, tmp_path):
+    hello.state.write_text("names: [../escape]\n")
+    result = await hello.run("create", "-f", str(hello.state))
+    assert result["blue/exit"] == 2
+    assert not (tmp_path / "work").exists()
+
+
+async def test_subworkflow_failure_prevents_report(hello, tmp_path):
+    from blue.workflow import advice_add
+
+    hello.wf = advice_add(hello.wf, "hello/verify", "override", "test/fail",
+                          lambda opts: {**opts, "blue/exit": 7, "blue/err": "verification failed"})
+    result = await hello.run("create", "-f", str(hello.state))
+    assert result["blue/exit"] == 7
+    assert result["blue/err"] == "verification failed"
+    assert "hello/report" not in result
+
+
+@pytest.mark.parametrize("content", ["[unclosed", "[alice, bob]", "names: [alice, alice]", "names: []"])
+async def test_bad_configuration_is_a_usage_error(hello, tmp_path, content):
+    hello.state.write_text(content)
+    result = await hello.run("create", "-f", str(hello.state))
+    assert result["blue/exit"] == 2
+    assert not (tmp_path / "work").exists()
+
+
+async def test_single_name_needs_no_fork_to_create_and_delete(hello, tmp_path):
+    hello.state.write_text("names: [alice]\n")
+    created = await hello.run("create", "-f", str(hello.state))
+    assert created["blue/exit"] == 0
+    assert (tmp_path / "work" / "alice.txt").is_file()
+    assert "hello alice from" in created["hello/report"]
+    deleted = await hello.run("delete", "-f", str(hello.state))
+    assert deleted["blue/exit"] == 0
+    assert deleted["hello/report"] == "removed 1 files"
+    assert not (tmp_path / "work").exists()

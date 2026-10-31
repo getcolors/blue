@@ -1,7 +1,7 @@
 [project]
 name = "blue"
 version = "0.1.0"
-description = "blue — the Python/uv workflow SDK of the green/red/blue family: opts->opts steps, wire_fn/next_fn graphs, layered advice, and YAML desired state with a COLORS_PAR_* overlay."
+description = "blue — the Python/uv workflow SDK of the green/red/blue family: opts->opts steps, DAGs, subworkflows, layered advice, and YAML desired state with a COLORS_PAR_* overlay."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

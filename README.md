@@ -6,10 +6,13 @@
 - a step is `opts -> opts` over one open dict;
 - a workflow is a static `wire_fn` graph plus an optional dynamic `next_fn`,
   with parallel fan-out and joins;
+- subworkflows embed reusable operations as ordinary steps;
 - behaviour is layered on with Emacs-style advice;
 - desired state is YAML, with a shared `COLORS_PAR_*` environment overlay for
-  credentials and one-run overrides;
-- dry-run, progress and lifecycle preflight are optional advice modules.
+  credentials and one-run overrides.
+
+Applications own their CLIs, validation, planning, reporting and durable state.
+Blue supplies execution and configuration helpers, not deployment policy.
 
 Blue is the foundation for deployment code written by coding agents.
 [PocketDeploy](https://github.com/pocketcontext/pocketdeploy) is the starter
@@ -25,14 +28,11 @@ The specification is [`index.html`](index.html), published at
 | green                | red                   | blue                  |
 |----------------------|-----------------------|-----------------------|
 | `:green/exit` etc.   | `"red/exit"` etc.     | `"blue/exit"` etc.    |
-| `green.edn`          | `red.yml`             | `blue.yml`            |
-| `./green` (babashka) | `./red` (Bun)         | `./blue` (uv script)  |
 | `green.workflow` ns  | `red/workflow` module | `blue.workflow` module|
 
 Namespaced keywords stay namespaced **string keys** (`"hello/file"`). The
 engine reserves `blue/*` and `blue.*/*` for its control keys (`"blue/exit"`,
-`"blue/err"`, `"blue/trace"`, `"blue/event"`, `"blue/dry-run"`, `"blue/step"`,
-`"blue/branches"`, `"blue/state-file"`, plus private keys such as
+`"blue/err"`, `"blue/trace"`, `"blue/step"`, `"blue/branches"`, plus private keys such as
 `"blue.workflow/inherited"`); everything project-specific uses its own
 namespace.
 
@@ -47,21 +47,21 @@ Try the example:
 
 ```sh
 cd examples/hello
-./blue create --dry-run   # uname runs; greet/report are skipped and logged
 ./blue create             # writes work/<name>.txt per name, then cats them
 ./blue delete             # removes them and the empty work/ directory
 ```
 
 ## Example
 
-`examples/hello` is the smallest complete package: a `./blue` uv-script
-launcher, desired state in `blue.yml` (flat kebab-case keys `workdir` and
-`names`), and three steps that call local CLIs directly. `hello/system` runs
-`uname -s`; `next_fn` fans out one `hello/greet` branch per name; the branches
-join at `hello/report`, which reads their `hello/file` results from
-`"blue/branches"` and runs `cat` over them. A relative `workdir` resolves
-against `"blue/state-file"`, and `COLORS_PAR_WORKDIR=/tmp/x ./blue create`
-overrides it for one run. `tests/test_example_hello.py` keeps it working.
+`examples/hello` is an offline application with its own argparse CLI and
+`blue.yml` input. `hello/system` runs `uname -s`; `next_fn` fans out one
+`hello/person` branch per name. Each branch embeds a two-step greeting
+subworkflow that writes/removes and verifies a file. The parent joins at
+`hello/report`, which reads `"blue/branches"` and runs `cat` on create.
+Application-defined around advice logs every stage, including inherited advice
+inside the subworkflow. A relative `workdir` resolves against the selected
+file; `COLORS_PAR_WORKDIR` overrides it for one run.
+`tests/test_example_hello.py` covers these behaviors and child failure handling.
 
 ## Modules
 
@@ -89,32 +89,30 @@ Under `src/blue/`, mirroring red's `src/*.ts`:
   truthiness (only `None`/`False` are falsy). Advice is inherited through
   embedded workflows by flat step name; same-id ancestor advice replaces child
   advice. `advice_plan` shows the composed stack.
-- `cli.py` — `load_yaml` (YAML 1.2 core-schema scalars: `no`, dates and
-  sexagesimal values stay strings; scientific notation, `0o` octal and `0x`
-  hexadecimal are numeric), `read_pars` / `par_name` (the `COLORS_PAR_*`
-  overlay), `find_up`, and `run_cli` / `exec_cli`, which parse
-  `./blue <event> [-f blue.yml] [--start step] [--end step] [--dry-run]`,
-  stamp `"blue/event"`, `"blue/state-file"` and `"blue/dry-run"`, and run the
-  workflow. Exit 2 is reserved for usage/config errors. Explicit file options
-  override configured defaults; parent-directory search applies only when the
-  file option is omitted.
-- `dry_run.py` — `dry_run.advise(wf, steps)` adds around advice that logs and
-  skips the listed steps when `"blue/dry-run"` is true.
-- `progress.py` — `progress.advise(wf)` logs every step's entry and elapsed
-  time.
-- `lifecycle.py` — `preflight`: defaults, overlay, ordered validators and an
-  optional success callback, returning exit 2 with every validation error.
-- `runtime.py` — the mutable log seam: `runtime.log` is what `dry_run` and
-  `progress` write through, so tests and packages can capture output.
+- `cli.py` — configuration helpers only, kept at the existing import path:
+  `load_yaml` (YAML 1.2 core-schema scalars: `no`, dates and sexagesimal values
+  stay strings; scientific notation, `0o` octal and `0x` hexadecimal are
+  numeric), and `read_pars` / `par_name` (the `COLORS_PAR_*` overlay).
+  Applications decide which file to read and whether to apply the overlay.
 
-## The ./blue launcher
+## Composition and boundaries
 
-A project's `./blue` is a **self-contained uv script**: a
-`#!/usr/bin/env -S uv run --script` shebang plus PEP 723 inline metadata — no
-virtualenv to manage, no requirements file. It holds the workflow definition,
-advice wiring and the `exec_cli` call. The in-repo example depends on blue by
-relative path via `[tool.uv.sources]`; external consumers pin a git reference
-to a commit (nothing is published to PyPI) — never unpinned.
+`step(subworkflow, in_fn=..., out_fn=...)` embeds a workflow. By default the
+child result is the parent step result, including failure. An explicit
+`out_fn` is responsible for preserving or deliberately handling the child's
+exit/error. Namespaced step names avoid accidental advice targeting: parent
+advice reaches child steps by flat name, and matching ancestor IDs replace
+child entries. Use `advice_plan` to inspect the effective stack.
+
+`workflow(start=..., end=...)` retains inclusive engine-level slicing.
+Applications can build their own CLI with argparse or another parser and call
+`await run(wf, opts)`. There is no SDK CLI, file discovery, lifecycle preflight,
+progress logger or dry-run policy. Applications may implement such behavior
+with advice; a skipped step is not a deployment plan. The engine does not
+persist runs or supply durable recovery: PocketDeploy owns its journal.
+
+Nothing is published to PyPI. External consumers pin a git reference to a
+published commit; the in-repo example uses a relative `[tool.uv.sources]` path.
 
 ## Conventions
 

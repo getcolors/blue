@@ -7,30 +7,21 @@
 # [tool.uv.sources]
 # blue = { path = "../.." }
 # ///
-# Self-contained blue CLI for a tiny, offline package. Run from anywhere:
-#
-#   ./blue create --dry-run   # print what would run, touch nothing
-#   ./blue create             # write one greeting file per name under work/
-#   ./blue delete             # remove them again
-#
-# Steps call local CLIs directly (`uname`, `cat`), the same way a real package
-# calls `gcloud`, `oci`, `doctl` or an HTTP API. In-repo example: blue is
-# depended on by relative path via [tool.uv.sources]; an external consumer
-# pins a git reference to a commit — never unpinned.
-
+"""Offline application: its CLI, file handling and reporting belong here."""
+import argparse
 import asyncio
 import sys
 from pathlib import Path
 
-from blue import dry_run, progress
-from blue.cli import exec_cli, run_cli
-from blue.workflow import workflow
+import yaml
+
+from blue.cli import load_yaml, read_pars
+from blue.workflow import advice_add_all, failed, run as run_workflow, step, workflow
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 async def sh(*cmd: str) -> tuple[int, str, str]:
-    """Run a local command and capture its output."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -42,12 +33,7 @@ async def sh(*cmd: str) -> tuple[int, str, str]:
 
 
 def workdir(opts) -> Path:
-    """Resolve workdir against the desired-state file's directory."""
-    base = Path(opts["blue/state-file"]).parent
-    return base / str(opts.get("workdir") or "work")
-
-
-# --- steps: opts -> opts ------------------------------------------------------
+    return Path(opts["hello/state-file"]).parent / str(opts.get("workdir") or "work")
 
 
 async def system_step(opts):
@@ -58,21 +44,27 @@ async def system_step(opts):
 
 
 def greet_step(opts):
-    """One branch per name (fanned out by next_fn)."""
-    name = opts["hello/name"]
-    target = workdir(opts) / f"{name}.txt"
-    if opts.get("blue/event") == "delete":
+    target = workdir(opts) / f"{opts['hello/name']}.txt"
+    if opts["hello/event"] == "delete":
         target.unlink(missing_ok=True)
-        return {**opts, "hello/file": str(target)}
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(f"hello {name} from {opts['hello/system']}\n")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"hello {opts['hello/name']} from {opts['hello/system']}\n")
     return {**opts, "hello/file": str(target)}
 
 
+def verify_step(opts):
+    target = Path(opts["hello/file"])
+    if opts["hello/event"] == "delete":
+        assert not target.exists(), "greeting was not removed"
+    else:
+        assert target.read_text() == f"hello {opts['hello/name']} from {opts['hello/system']}\n"
+    return dict(opts)
+
+
 async def report_step(opts):
-    """Join: runs once, after every greet branch, with their results."""
-    files = sorted(b["hello/file"] for b in opts["blue/branches"])
-    if opts.get("blue/event") == "delete":
+    files = sorted(b["hello/file"] for b in opts.get("blue/branches", [opts]))
+    if opts["hello/event"] == "delete":
         directory = workdir(opts)
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
@@ -84,43 +76,72 @@ async def report_step(opts):
     return {**opts, "hello/report": out}
 
 
-# --- workflow -----------------------------------------------------------------
+# One reusable operation, embedded once per name by the parent DAG.
+greeting = workflow(start="hello/greet", wire_fn=lambda name, _: {
+    "hello/greet": (greet_step, "hello/verify"),
+    "hello/verify": (verify_step,),
+}.get(name))
 
 
-def wire_fn(step, _run_opts):
+def wire_fn(name, _run_opts):
     return {
-        "hello/system": (system_step, "hello/greet"),
-        "hello/greet": (greet_step, "hello/report"),
+        "hello/system": (system_step, "hello/person"),
+        "hello/person": (step(greeting), "hello/report"),
         "hello/report": (report_step,),
-    }.get(step)
+    }.get(name)
 
 
-def next_fn(step, default_next, opts):
-    if (opts.get("blue/exit") or 0) > 0:
+def next_fn(name, default_next, opts):
+    if failed(opts):
         return []
-    if step == "hello/system":
-        return [("hello/greet", {**opts, "hello/name": n}) for n in opts["names"]]
+    if name == "hello/system":
+        return [("hello/person", {**opts, "hello/name": n}) for n in opts["names"]]
     return [(s, opts) for s in (default_next or [])]
 
 
-wf = workflow(start="hello/system", wire_fn=wire_fn, next_fn=next_fn)
-# --dry-run skips the steps that change or report files; uname still runs
-wf = dry_run.advise(wf, ["hello/greet", "hello/report"])
-wf = progress.advise(wf)
+async def report_stage(inner, opts):
+    """Application-defined advice, inherited by the greeting subworkflow."""
+    print(f">>> {opts['blue/step']} ({opts['hello/event']})", file=sys.stderr)
+    result = await inner(opts)
+    print(f"<<< {opts['blue/step']} (exit {result.get('blue/exit', 0)})", file=sys.stderr)
+    return result
 
 
-def file_arg(a):
-    return a in ("-f", "--file") or a.startswith("--file=")
+wf = advice_add_all(workflow(start="hello/system", wire_fn=wire_fn, next_fn=next_fn),
+                    "around", "hello/report-stage", report_stage)
 
 
-def default_args(args):
-    return args if any(file_arg(a) for a in args) else [*args, "-f", f"{SCRIPT_DIR}/blue.yml"]
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError(message)
 
 
-def run(*args):
-    """REPL/test-friendly entrypoint: resolves without calling sys.exit."""
-    return run_cli(wf, default_args(list(args)), allowed_events=["create", "delete"])
+async def run(*args):
+    """Application entrypoint; the SDK supplies execution, not a CLI."""
+    parser = Parser(prog="hello")
+    parser.add_argument("event", choices=["create", "delete"])
+    parser.add_argument("-f", "--file", default=str(SCRIPT_DIR / "blue.yml"))
+    try:
+        parsed = parser.parse_args(args)
+        path = Path(parsed.file).resolve()
+        loaded = load_yaml(path.read_text())
+        if not isinstance(loaded, dict):
+            raise ValueError("configuration must be a mapping")
+        config = read_pars(loaded)
+        names = config.get("names")
+        if not isinstance(names, list) or not names or any(
+            not isinstance(name, str) or not name.isalnum() for name in names
+        ) or len(set(names)) != len(names):
+            raise ValueError("names must be a nonempty list of unique alphanumeric strings")
+        if not isinstance(config.get("workdir", "work"), str):
+            raise ValueError("workdir must be a string")
+    except (ValueError, OSError, yaml.YAMLError) as error:
+        return {"blue/exit": 2, "blue/err": str(error)}
+    return await run_workflow(wf, {**config, "hello/state-file": str(path), "hello/event": parsed.event})
 
 
 if __name__ == "__main__":
-    exec_cli(wf, default_args(sys.argv[1:]), allowed_events=["create", "delete"])
+    result = asyncio.run(run(*sys.argv[1:]))
+    if result.get("blue/err"):
+        print(result["blue/err"], file=sys.stderr)
+    sys.exit(result.get("blue/exit", 0))
